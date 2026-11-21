@@ -12,7 +12,9 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import platform
 import random
+import subprocess
 import time
 from pathlib import Path
 
@@ -36,6 +38,27 @@ def textworld_games(directory: str) -> list[tuple[str, object, int]]:
 
 def keychest_games(seeds) -> list[tuple[str, object, int]]:
     return [(f"keychest-{s}", KeyChestEnv, s) for s in seeds]
+
+
+def run_metadata(cfg: Config, args) -> dict:
+    """What a report needs to identify the run: code version, host, library versions, device."""
+    root = Path(__file__).resolve().parents[1]
+
+    def git(*cmd):
+        try:
+            return subprocess.run(["git", "-C", str(root), *cmd], capture_output=True, text=True,
+                                  check=True).stdout.strip()
+        except (OSError, subprocess.CalledProcessError):
+            return None
+
+    import transformers
+
+    meta = {"commit": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain", "--untracked-files=no")),
+            "branch": git("rev-parse", "--abbrev-ref", "HEAD"), "host": platform.node(),
+            "python": platform.python_version(), "torch": torch.__version__, "transformers": transformers.__version__,
+            "cuda_device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
+            "started": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+    return {"meta": meta, "args": vars(args), **cfg.to_dict()}
 
 
 def evaluate(policy: LMPolicy, games, seeds, max_actions: int) -> dict:
@@ -78,11 +101,13 @@ def main(argv=None):
     ap.add_argument("--revision")
     ap.add_argument("--train-games")
     ap.add_argument("--val-games")
+    ap.add_argument("--val-limit", type=int, help="evaluate on the first N validation games only")
     ap.add_argument("--out", required=True)
     ap.add_argument("--batches", type=int, default=400)
     ap.add_argument("--eval-every", type=int, default=50)
     ap.add_argument("--eval-seeds", type=int, nargs="+", default=[17, 23, 29])
     ap.add_argument("--seed", type=int, default=17)
+    ap.add_argument("--no-save", action="store_true", help="do not write checkpoints")
     ap.add_argument("--smoke", action="store_true", help="tiny random model on KeyChest, CPU")
     args = ap.parse_args(argv)
 
@@ -91,6 +116,7 @@ def main(argv=None):
         cfg.policy.max_reasoning_tokens = min(cfg.policy.max_reasoning_tokens, 8)
         cfg.grpo.games_per_batch, cfg.grpo.group_size, cfg.grpo.max_actions = 2, 4, 4
         args.batches, args.eval_every, args.eval_seeds = min(args.batches, 3), 2, [0, 1]
+        args.model = "tiny-random-llama (smoke)"
     model, tokenizer = load(args, cfg)
     if args.smoke:
         train_games, val_games = keychest_games(range(8)), keychest_games(range(100, 104))
@@ -99,10 +125,12 @@ def main(argv=None):
             ap.error("--train-games is required unless --smoke")
         train_games = textworld_games(args.train_games)
         val_games = textworld_games(args.val_games) if args.val_games else []
+    if args.val_limit is not None:
+        val_games = val_games[:args.val_limit]
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    (out / "config.json").write_text(json.dumps({"args": vars(args), **cfg.to_dict()}, indent=2))
+    (out / "config.json").write_text(json.dumps(run_metadata(cfg, args), indent=2))
     metrics_file = (out / "metrics.jsonl").open("a")
 
     def log(record):
@@ -121,10 +149,14 @@ def main(argv=None):
 
     def run_eval(batch):
         if val_games:
-            log({"batch": batch, "split": "val", **evaluate(policy, val_games, args.eval_seeds, g.max_actions)})
+            start = time.time()
+            result = evaluate(policy, val_games, args.eval_seeds, g.max_actions)
+            log({"batch": batch, "split": "val", "eval_s": round(time.time() - start, 2), **result})
 
     run_eval(0)
     for batch in range(1, args.batches + 1):
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
         start = time.time()
         groups = []
         for name, make_env, env_seed in (rng.choice(train_games) for _ in range(g.games_per_batch)):
@@ -132,11 +164,16 @@ def main(argv=None):
             groups.append(collect_group(policy, make_env, name, env_seed, seeds, g.max_actions))
         rollout_time = time.time() - start
         metrics = trainer.step(groups)
+        decisions = sum(ep.length for group in groups for ep in group)
+        peak = torch.cuda.max_memory_allocated() / 2 ** 30 if torch.cuda.is_available() else None
         log({"batch": batch, "split": "train", "rollout_s": round(rollout_time, 2),
-             "update_s": round(time.time() - start - rollout_time, 2), **metrics})
+             "update_s": round(time.time() - start - rollout_time, 2), "decisions": decisions,
+             "reasoning_tokens": sum(len(d.reasoning_ids) for group in groups for ep in group for d in ep.decisions),
+             "gpu_peak_gb": None if peak is None else round(peak, 2),
+             **metrics})
         if batch % args.eval_every == 0 or batch == args.batches:
             run_eval(batch)
-            if not args.smoke:
+            if not (args.smoke or args.no_save):
                 model.save_pretrained(out / "checkpoints" / f"batch{batch:04d}")
     metrics_file.close()
 

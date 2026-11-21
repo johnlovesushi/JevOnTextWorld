@@ -32,9 +32,18 @@ jevtw/
   train.py       训练循环与评测（含 --smoke CPU 冒烟）
   testing.py     字节分词器 + 随机小模型（测试用，不需要下载）
 configs/         grpo.json（λ=α=0）、grpo_calibrated.json（λ=0.3, α=0.1）
+  experiments/   每个实验一份配置：<ID>.json
 scripts/         make_games.py：用 tw-make 生成 cooking 游戏
+                 summarize_run.py：把一次运行整理成固定格式的报告
+reports/         实验报告 <ID>.md / <ID>.json
 tests/           CPU 单元测试
+CLAUDE.md        给服务器端 agent 的工作说明
 ```
+
+## 协作方式
+
+规划端（claude.ai 会话）在 GitHub issue 里写任务，服务器端 agent 按 `CLAUDE.md` 执行：
+每个任务开一个分支，跑完用 `scripts/summarize_run.py` 生成报告，提交到 `reports/`，再开 PR 给规划端审阅。
 
 ## 快速开始
 

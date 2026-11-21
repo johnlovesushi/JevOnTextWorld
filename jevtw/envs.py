@@ -71,8 +71,9 @@ class KeyChestEnv:
     def _observe(self, text: str) -> Observation:
         s = self._state
         inventory = "the key" if s["has_key"] else "nothing"
-        return Observation(text=f"{text}\nYou are carrying: {inventory}.", commands=[] if s["done"] else self._commands(),
-                           done=s["done"], won=s["won"])
+        commands = [] if s["done"] else self._commands()
+        return Observation(text=f"{text}\nYou are carrying: {inventory}.", commands=commands, done=s["done"],
+                           won=s["won"])
 
 
 def _clean_feedback(feedback: str) -> str:
