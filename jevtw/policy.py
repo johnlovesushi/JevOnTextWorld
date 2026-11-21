@@ -149,11 +149,18 @@ class LMPolicy:
             for r, opt in enumerate(chunk):
                 ids[r, :n + len(opt)] = torch.tensor(context + opt, device=self.device)
                 mask[r, :n + len(opt)] = 1
-            logprobs = torch.log_softmax(model(input_ids=ids, attention_mask=mask).logits.float(), dim=-1)
-            for r, opt in enumerate(chunk):
-                pos = torch.arange(n - 1, n - 1 + len(opt), device=self.device)
-                target = torch.tensor(opt, device=self.device)
-                scores.append(logprobs[r, pos, target].sum())
+            # Only positions n-1 .. n-2+|a^j| predict option tokens. Run the transformer body on the whole batch
+            # but apply the output layer (and FP32 log-softmax) to those positions alone: full-vocabulary logits
+            # for every context position of every row do not fit on a GPU with a real vocabulary
+            # (16 rows x ~2200 tokens x 152k vocab x 4 bytes = 20 GiB for Qwen).
+            hidden = model.base_model(input_ids=ids, attention_mask=mask).last_hidden_state
+            rows = torch.tensor([r for r, opt in enumerate(chunk) for _ in opt], device=self.device)
+            pos = torch.tensor([n - 1 + k for opt in chunk for k in range(len(opt))], device=self.device)
+            target = torch.tensor([t for opt in chunk for t in opt], device=self.device)
+            logprobs = torch.log_softmax(model.get_output_embeddings()(hidden[rows, pos]).float(), dim=-1)
+            token_lp = logprobs.gather(1, target[:, None])[:, 0]
+            sizes = [len(opt) for opt in chunk]
+            scores.extend(part.sum() for part in token_lp.split(sizes))
         return torch.stack(scores)
 
     def _reasoning_logps(self, model, d: Decision) -> torch.Tensor:
