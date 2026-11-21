@@ -1,0 +1,22 @@
+{
+  "policy": {
+    "max_reasoning_tokens": 320,
+    "history_window": 8,
+    "forecast": true,
+    "option_batch_size": 16
+  },
+  "grpo": {
+    "games_per_batch": 4,
+    "group_size": 8,
+    "max_actions": 50,
+    "lam": 0.0,
+    "alpha": 0.0,
+    "beta": 0.04,
+    "clip_eps": 0.2,
+    "adv_delta": 1e-8,
+    "normalization": "token",
+    "optimization_passes": 2,
+    "learning_rate": 2e-6,
+    "grad_clip": 1.0
+  }
+}
