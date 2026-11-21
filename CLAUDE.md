@@ -52,13 +52,38 @@
 
 ## 服务器环境
 
-（由执行端在 E0001 中填写：仓库路径、venv、`module load`、`HF_HOME`、Slurm 分区/账户/GPU 型号、
-游戏数据路径、提交作业的命令。）
+执行端在 E0001 中填写（2026-11-21，集群 killarney，登录节点 `klogin03`）。
 
-参考 rlcd-bench 当时的设置，但以服务器实际情况为准：
-- L40S，分区 `gpubase_l40s_b3`，账户 `aip-rjliao`
-- `source /etc/profile; module load python/3.12 arrow cuda`
-- `HF_HOME=/scratch/$USER/hf_cache`
+- **仓库路径**：`/scratch/$USER/JevOnTextWorld`
+- **模块**：`source /etc/profile; module load python/3.12 arrow cuda`
+  （得到 Python 3.12.4、arrow 18.1.0、cuda 12.2；torch 自带到 CUDA 13.2 库的路径，不依赖 `cuda` 模块的版本）
+- **venv**：仓库下的 `.venv/`（已在 `.gitignore` 里）。建法：
+  ```bash
+  virtualenv --no-download .venv && source .venv/bin/activate
+  pip install --no-index torch transformers pydantic spacy pytest   # 先装集群 wheelhouse 里的预编译包
+  pip install -r requirements.txt                                   # 再装 textworld 等剩下的包
+  ```
+  必须先跑 `--no-index` 那一步：集群的 pip 不接受 PyPI 上的 manylinux wheel，直接
+  `pip install -r requirements.txt` 会去从源码编译 `pydantic-core`（需要 Rust），然后失败。
+- **版本**：torch 2.14.1（CUDA 13.2）、transformers 5.22.2、textworld 1.7.0、jericho 3.3.1
+- **`HF_HOME`**：`/scratch/$USER/hf_cache`。`Qwen/Qwen3-1.7B` 已下载
+  （revision `70d244cc86ccca08cf5af4e1e306ecf908b1ad5e`）。
+- **网络**：模型、pip 包、游戏数据都在登录节点准备好；作业里设了 `HF_HUB_OFFLINE=1`，不依赖计算节点联网。
+- **Slurm**：分区 `gpubase_l40s_b3`（每节点 4 张 L40S、64 核、约 500 GB 内存，时限 24 小时），
+  账户 `aip-rjliao`。GPU 任务一律用 Slurm 提交，不在登录节点上跑。
+- **游戏数据**：`data/games/{train,valid,test}`（300 / 40 / 80 局，`scripts/make_games.py` 默认种子 0），
+  清单在 `data/games/manifest.json`。不进 git。
+- **提交作业**（在仓库根目录执行）：
+  ```bash
+  mkdir -p runs/slurm
+  sbatch --job-name=<ID> scripts/slurm/train.sbatch configs/experiments/<ID>.json runs/<ID> \
+      --model Qwen/Qwen3-1.7B --train-games data/games/train --val-games data/games/valid [其余 jevtw.train 参数]
+  ```
+  日志在 `runs/slurm/<作业名>-<jobid>.out`。脚本默认单卡、8 核、48 GB、3 小时；要改就在 `sbatch` 命令行上
+  加 `--time` 等参数。输出目录已存在时脚本会直接退出，不会覆盖。
+- **登录节点上的注意事项**：
+  - 跑 CPU 测试时设 `OMP_NUM_THREADS=4`，否则 torch 会按整台机器的核数开线程，非常慢。
+  - `gh` 装在 `~/.local/bin`；它偶尔会因为创建线程失败而崩溃，前面加 `GOMAXPROCS=2` 即可。
 
 ## 代码约定
 
