@@ -23,7 +23,7 @@ import torch
 from .config import Config
 from .envs import KeyChestEnv, TextWorldEnv
 from .policy import LMPolicy
-from .rollout import collect_group, run_episode
+from .rollout import collect_batch, rollout_metrics
 from .trainer import Trainer
 
 GAME_SUFFIXES = (".z8", ".ulx")
@@ -61,21 +61,18 @@ def run_metadata(cfg: Config, args) -> dict:
     return {"meta": meta, "args": vars(args), **cfg.to_dict()}
 
 
-def evaluate(policy: LMPolicy, games, seeds, max_actions: int) -> dict:
-    """One sampled episode per (game, seed). Reports the win rate and how well p_t forecast z."""
-    episodes = []
-    for name, make_env, env_seed in games:
-        env = make_env()
-        try:
-            episodes += [run_episode(policy, env, name, env_seed, s, max_actions) for s in seeds]
-        finally:
-            if hasattr(env, "close"):
-                env.close()
+def evaluate(policy: LMPolicy, games, seeds, max_actions: int, parallel: int = 1) -> dict:
+    """One sampled episode per (game, seed). Reports the win rate, how well p_t forecast z, and sampling speed."""
+    jobs = [(name, make_env, env_seed, s) for name, make_env, env_seed in games for s in seeds]
+    stats, start = {}, time.time()
+    episodes = collect_batch(policy, jobs, max_actions, parallel, stats)
+    sampling = rollout_metrics(episodes, stats, time.time() - start, policy.eos_id)
     pairs = [(d.p, ep.z) for ep in episodes for d in ep.decisions if d.p is not None]
     return {"episodes": len(episodes), "win_rate": sum(ep.z for ep in episodes) / len(episodes),
             "mean_length": sum(ep.length for ep in episodes) / len(episodes),
             "forecast_brier": (sum((p - z) ** 2 for p, z in pairs) / len(pairs)) if pairs else None,
-            "mean_forecast": (sum(p for p, _ in pairs) / len(pairs)) if pairs else None}
+            "mean_forecast": (sum(p for p, _ in pairs) / len(pairs)) if pairs else None,
+            **sampling}
 
 
 def load(args, cfg: Config):
@@ -150,7 +147,7 @@ def main(argv=None):
     def run_eval(batch):
         if val_games:
             start = time.time()
-            result = evaluate(policy, val_games, args.eval_seeds, g.max_actions)
+            result = evaluate(policy, val_games, args.eval_seeds, g.max_actions, g.parallel_episodes)
             log({"batch": batch, "split": "val", "eval_s": round(time.time() - start, 2), **result})
 
     run_eval(0)
@@ -158,19 +155,20 @@ def main(argv=None):
         if torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()
         start = time.time()
-        groups = []
+        jobs = []
         for name, make_env, env_seed in (rng.choice(train_games) for _ in range(g.games_per_batch)):
-            seeds = [rng.randrange(2 ** 31) for _ in range(g.group_size)]
-            groups.append(collect_group(policy, make_env, name, env_seed, seeds, g.max_actions))
+            jobs += [(name, make_env, env_seed, rng.randrange(2 ** 31)) for _ in range(g.group_size)]
+        stats = {}
+        episodes = collect_batch(policy, jobs, g.max_actions, g.parallel_episodes, stats)
+        groups = [episodes[i:i + g.group_size] for i in range(0, len(episodes), g.group_size)]
         rollout_time = time.time() - start
         metrics = trainer.step(groups)
-        decisions = sum(ep.length for group in groups for ep in group)
         peak = torch.cuda.max_memory_allocated() / 2 ** 30 if torch.cuda.is_available() else None
         log({"batch": batch, "split": "train", "rollout_s": round(rollout_time, 2),
-             "update_s": round(time.time() - start - rollout_time, 2), "decisions": decisions,
-             "reasoning_tokens": sum(len(d.reasoning_ids) for group in groups for ep in group for d in ep.decisions),
+             "update_s": round(time.time() - start - rollout_time, 2),
+             "reasoning_tokens": sum(len(d.reasoning_ids) for ep in episodes for d in ep.decisions),
              "gpu_peak_gb": None if peak is None else round(peak, 2),
-             **metrics})
+             **rollout_metrics(episodes, stats, rollout_time, policy.eos_id), **metrics})
         if batch % args.eval_every == 0 or batch == args.batches:
             run_eval(batch)
             if not (args.smoke or args.no_save):

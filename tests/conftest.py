@@ -1,3 +1,5 @@
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -25,3 +27,16 @@ def policy_cfg():
 @pytest.fixture
 def policy(tokenizer, policy_cfg):
     return LMPolicy(tiny_model(seed=0), tokenizer, policy_cfg)
+
+
+@pytest.fixture(scope="session")
+def cooking_game(tmp_path_factory):
+    pytest.importorskip("textworld")
+    if shutil.which("tw-make") is None:
+        pytest.skip("tw-make not available")
+    path = tmp_path_factory.mktemp("tw") / "cook.z8"
+    proc = subprocess.run(["tw-make", "tw-cooking", "--recipe", "1", "--take", "1", "--go", "1", "--split", "train",
+                           "--seed", "1", "--output", str(path), "-f"], capture_output=True, text=True, timeout=300)
+    if proc.returncode != 0:
+        pytest.skip(f"tw-make failed: {proc.stderr[-300:]}")
+    return path

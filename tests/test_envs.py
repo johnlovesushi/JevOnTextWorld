@@ -1,6 +1,3 @@
-import shutil
-import subprocess
-
 import pytest
 
 from jevtw.envs import KeyChestEnv, TextWorldEnv
@@ -35,19 +32,6 @@ def test_keychest_same_seed_same_initial_state_and_loss():
     env.reset(0)
     with pytest.raises(ValueError):
         env.step("take key")
-
-
-@pytest.fixture(scope="module")
-def cooking_game(tmp_path_factory):
-    pytest.importorskip("textworld")
-    if shutil.which("tw-make") is None:
-        pytest.skip("tw-make not available")
-    path = tmp_path_factory.mktemp("tw") / "cook.z8"
-    proc = subprocess.run(["tw-make", "tw-cooking", "--recipe", "1", "--take", "1", "--go", "1", "--split", "train",
-                           "--seed", "1", "--output", str(path), "-f"], capture_output=True, text=True, timeout=300)
-    if proc.returncode != 0:
-        pytest.skip(f"tw-make failed: {proc.stderr[-300:]}")
-    return path
 
 
 def test_textworld_walkthrough(cooking_game):
