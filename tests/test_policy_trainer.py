@@ -6,7 +6,8 @@ import torch
 
 from jevtw.config import GRPOConfig, PolicyConfig
 from jevtw.envs import KeyChestEnv, Observation
-from jevtw.policy import LMPolicy, build_prompt
+from jevtw.policy import Decision, LMPolicy, build_prompt
+from jevtw.readout import yes_no_probability
 from jevtw.rollout import collect_group, run_episode
 from jevtw.testing import tiny_model
 from jevtw.trainer import Trainer, assign_returns
@@ -33,37 +34,145 @@ def test_sampling_and_scoring_agree(policy):
         assert 0.0 <= d.p <= 1.0 and p.item() == pytest.approx(d.p, abs=1e-5)
 
 
+# ---- Reference implementation (the pre-T0001 code): one full-context forward per quantity, full logits. ----
+
+def ref_option_scores(policy, model, context, options):
+    scores, n = [], len(context)
+    for opt in options:
+        logprobs = torch.log_softmax(model(input_ids=torch.tensor([context + opt])).logits[0].float(), dim=-1)
+        scores.append(sum(logprobs[n - 1 + i, t] for i, t in enumerate(opt)))
+    return torch.stack(scores)
+
+
+def ref_reasoning_logps(policy, model, d):
+    if not d.reasoning_ids:
+        return torch.zeros(0)
+    n = len(d.prompt_ids)
+    logits = model(input_ids=torch.tensor([d.prompt_ids + d.reasoning_ids])).logits[0, n - 1:-1].float()
+    return torch.log_softmax(logits, dim=-1).gather(1, torch.tensor(d.reasoning_ids)[:, None])[:, 0]
+
+
+def ref_forecasts(policy, model, d):
+    out = []
+    for opt in d.option_ids:
+        ids = d.action_context_ids + opt + policy.confidence_prompt_ids
+        out.append(yes_no_probability(model(input_ids=torch.tensor([ids])).logits[0, -1], policy.yes_id, policy.no_id))
+    return torch.stack(out)
+
+
+def _manual_decision(policy, ending: str, n_options: int = 12, action: int = 10) -> Decision:
+    """A hand-built decision (no sampling). `ending` is how the reasoning stopped."""
+    prompt = policy.encode("Objective: open the chest.\nOptions:\n1. a\n2. b\nReasoning:")
+    reasoning = {"answer": policy.encode(" the key first\n" + policy.cfg.answer_prefix),
+                 "eos": policy.encode(" take key") + [policy.eos_id],
+                 "cap": policy.encode(" I think"),
+                 "none": []}[ending]
+    context = policy._action_context(prompt, reasoning)
+    expected_n = {"answer": len(prompt) + len(reasoning),
+                  "eos": len(prompt) + len(reasoning) - 1 + len(policy.answer_ids),
+                  "cap": len(prompt) + len(reasoning) + len(policy.answer_ids),
+                  "none": len(prompt) + len(policy.answer_ids)}[ending]
+    assert len(context) == expected_n
+    options = [policy.encode(f" {j + 1}") + [policy.eos_id] for j in range(n_options)]   # one- and two-digit numbers
+    assert {len(o) for o in options} == {3, 4}
+    return Decision(command="x", action=action, prompt_ids=prompt, reasoning_ids=reasoning,
+                    action_context_ids=context, option_ids=options, behavior_logps=[])
+
+
+ENDINGS = ["answer", "eos", "cap", "none"]
+
+
+@pytest.mark.parametrize("ending", ENDINGS)
+def test_decision_forward_matches_reference(policy, ending):
+    """Shared-prefix scoring returns the same reasoning log-probs, l(a^j) and p_j as full-context forwards."""
+    d = _manual_decision(policy, ending)
+    with torch.no_grad():
+        lp, scores, p = policy.decision_forward(policy.model, d, forecast=True)
+        _, scores_no_forecast, none = policy.decision_forward(policy.model, d, forecast=False)
+        assert none is None and torch.allclose(scores, scores_no_forecast, atol=1e-5)   # appending z changes nothing
+        assert lp.shape == (len(d.reasoning_ids),) and scores.shape == p.shape == (12,)
+        assert torch.allclose(lp, ref_reasoning_logps(policy, policy.model, d), atol=1e-4)
+        assert torch.allclose(scores, ref_option_scores(policy, policy.model, d.action_context_ids, d.option_ids),
+                              atol=1e-4)
+        assert torch.allclose(p, ref_forecasts(policy, policy.model, d), atol=1e-4)
+        logps, p_a = policy.score(d, forecast=True)
+        assert logps.shape == (d.n_terms,) and p_a.item() == pytest.approx(p[d.action].item())
+        assert logps[-1].item() == pytest.approx(torch.log_softmax(scores, 0)[d.action].item(), abs=1e-6)
+
+
+@pytest.mark.parametrize("ending", ENDINGS)
+def test_decision_forward_gradient_matches_reference(policy, ending):
+    d = _manual_decision(policy, ending)
+    params = [w for w in policy.model.parameters() if w.requires_grad]
+
+    logps, p_a = policy.score(d, forecast=True)
+    new = torch.autograd.grad(logps.sum() + p_a, params, allow_unused=True)
+
+    log_q = torch.log_softmax(ref_option_scores(policy, policy.model, d.action_context_ids, d.option_ids), dim=0)
+    ref_scalar = (ref_reasoning_logps(policy, policy.model, d).sum() + log_q[d.action]
+                  + ref_forecasts(policy, policy.model, d)[d.action])
+    ref = torch.autograd.grad(ref_scalar, params, allow_unused=True)
+
+    assert (logps.sum() + p_a).item() == pytest.approx(ref_scalar.item(), abs=1e-4)
+    flat = lambda gs: torch.cat([torch.zeros_like(w).flatten() if g is None else g.flatten()
+                                 for g, w in zip(gs, params)])
+    g_new, g_ref = flat(new), flat(ref)
+    assert g_ref.norm() > 0 and (g_new - g_ref).norm() / g_ref.norm() < 1e-4
+
+
+@pytest.mark.parametrize("forecast", [True, False])
+def test_decision_forward_work_is_one_prefix_plus_suffixes(policy, forecast):
+    """Regression for the E0001 OOMs: the context is embedded once, and the output layer only sees the positions
+    that are read (never the whole context)."""
+    d = _manual_decision(policy, "cap")
+    n, c, z = len(d.action_context_ids), len(d.reasoning_ids), len(policy.confidence_prompt_ids)
+    embedded, projected = [], []
+    hooks = [policy.model.get_input_embeddings().register_forward_hook(
+                 lambda module, args, output: embedded.append(args[0].numel())),
+             policy.model.get_output_embeddings().register_forward_hook(
+                 lambda module, args, output: projected.append(output.numel() // output.shape[-1]))]
+    try:
+        with torch.no_grad():
+            policy.decision_forward(policy.model, d, forecast=forecast)
+    finally:
+        for h in hooks:
+            h.remove()
+    # The suffix batch is right-padded to the longest option (" 12<EOS>" vs " 1<EOS>"), so the embedding layer also
+    # sees max_j m_j - m_j padding tokens per row on top of the real (n-1) + sum_j (1 + m_j + |z|).
+    padding = sum(max(map(len, d.option_ids)) - len(o) for o in d.option_ids)
+    real = (n - 1) + sum(1 + len(o) + (z if forecast else 0) for o in d.option_ids)
+    assert 0 < padding <= len(d.option_ids) and sum(embedded) == real + padding
+    assert sum(projected) <= c + sum(len(o) + (1 if forecast else 0) for o in d.option_ids)
+    assert sum(embedded) < len(d.option_ids) * n               # the old cost: one full context per option
+
+
 def test_action_distribution_is_softmax_over_options(policy):
     env = KeyChestEnv()
     obs = env.reset(1)
     d = policy.act(env.objective, [], obs, torch.Generator().manual_seed(0))
     with torch.no_grad():
-        scores = policy._option_scores(policy.model, d.action_context_ids, d.option_ids)
+        scores = ref_option_scores(policy, policy.model, d.action_context_ids, d.option_ids)
+        forecasts = ref_forecasts(policy, policy.model, d)
     assert scores.shape == (len(obs.commands),)
-    assert d.behavior_logps[-1] == pytest.approx(float(torch.log_softmax(scores, 0)[d.action]), abs=1e-5)
+    assert d.behavior_logps[-1] == pytest.approx(float(torch.log_softmax(scores, 0)[d.action]), abs=1e-4)
+    assert len(d.p_options) == len(obs.commands) and d.p == d.p_options[d.action]
+    assert torch.allclose(torch.tensor(d.p_options), forecasts, atol=1e-4)
 
 
-def test_option_scores_only_project_option_positions(policy):
-    """Regression (E0001 OOM): scoring must not build full-vocabulary logits for every context position, and the
-    scores must equal the ones read from the full logits."""
-    d = policy.act("goal", [], Observation("room", "nothing", [f"cmd {i}" for i in range(5)]), torch.Generator().manual_seed(2))
-    context, options = d.action_context_ids, d.option_ids + [policy.encode(" 12") + [policy.eos_id]]
+def test_sampling_prefill_projects_one_position_per_step(policy):
+    """Sampling c_t never builds logits for the prompt positions: one output-layer row per sampled token, plus the
+    rows of the single decision_forward call."""
+    obs = Observation("a room", [f"cmd {i}" for i in range(5)])
     projected = []
     hook = policy.model.get_output_embeddings().register_forward_hook(
         lambda module, args, output: projected.append(output.numel() // output.shape[-1]))
     try:
-        with torch.no_grad():
-            scores = policy._option_scores(policy.model, context, options)
+        d = policy.act("goal", [], obs, torch.Generator().manual_seed(2))
     finally:
         hook.remove()
-    assert sum(projected) == sum(len(o) for o in options) < len(context)
-    n = len(context)
-    with torch.no_grad():
-        for j, opt in enumerate(options):
-            ids = torch.tensor([context + opt])
-            logprobs = torch.log_softmax(policy.model(input_ids=ids).logits[0].float(), dim=-1)
-            expected = sum(logprobs[n - 1 + k, t] for k, t in enumerate(opt))
-            assert scores[j].item() == pytest.approx(expected.item(), abs=1e-4)
+    c = len(d.reasoning_ids)
+    assert d.command in obs.commands and len(d.option_ids) == 5
+    assert sum(projected) == c + c + sum(len(o) + 1 for o in d.option_ids) < len(d.prompt_ids)
 
 
 def test_no_reasoning_mode(tokenizer, policy_cfg):

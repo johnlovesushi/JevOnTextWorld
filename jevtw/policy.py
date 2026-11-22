@@ -5,6 +5,9 @@ sampling law is exactly pi_theta), then picks a_t from q_theta = softmax over th
 logit l(a^j) of option j is the log-likelihood of the continuation " j<EOS>" after "Answer:". Afterwards it can read
 the forecast p_t = sigmoid(l(yes) - l(no)) after a confidence question that is never written into the history.
 
+All three come from `decision_forward`, which runs the shared prefix (the action context) through the transformer
+once and then a short batch of K suffixes "option j + confidence question" on top of its KV cache.
+
 Likelihood terms: every sampled reasoning token (its exact ids, including a sampled EOS or the tokens of "Answer:")
 and the single categorical action. Prompts, observations and the forced "Answer:" have none. Token ids are stored
 and reused verbatim, so scoring never re-tokenises generated text."""
@@ -15,7 +18,6 @@ from dataclasses import dataclass, field
 from typing import Sequence
 
 import torch
-import torch.nn.functional as F
 
 from .config import PolicyConfig
 from .envs import Observation
@@ -32,6 +34,7 @@ class Decision:
     option_ids: list[list[int]]           # " j<EOS>" for every option j
     behavior_logps: list[float]           # log-probs at sampling time: |c_t| reasoning tokens, then log q(a_t)
     p: float | None = None                # forecast at sampling time (theta_old), used for b_i
+    p_options: list[float] | None = None  # p_j for every option j: "win probability if a^j were chosen" (Q_win)
     confidence_ids: list[int] | None = None
     old_logps: list[float] | None = field(default=None, repr=False)   # filled by the trainer
     ref_logps: list[float] | None = field(default=None, repr=False)
@@ -75,7 +78,8 @@ class LMPolicy:
         if self.yes_id == self.no_id:
             raise ValueError("yes and no map to the same token")
         # Recent transformers renamed past_key_values to cache (argument and output field).
-        self._cache_kw = "cache" if "cache" in inspect.signature(model.forward).parameters else "past_key_values"
+        params = inspect.signature(model.base_model.forward).parameters
+        self._cache_kw = "cache" if "cache" in params else "past_key_values"
 
     def encode(self, text: str) -> list[int]:
         return list(self.tokenizer(text, add_special_tokens=False)["input_ids"])
@@ -99,30 +103,63 @@ class LMPolicy:
         reasoning, logps = self._sample_reasoning(prompt_ids, generator)
         context = self._action_context(prompt_ids, reasoning)
         options = [self.encode(f" {j + 1}") + [self.eos_id] for j in range(len(obs.commands))]
-        log_q = torch.log_softmax(self._option_scores(self.model, context, options), dim=0)
+        decision = Decision(command="", action=-1, prompt_ids=prompt_ids, reasoning_ids=reasoning,
+                            action_context_ids=context, option_ids=options, behavior_logps=[])
+        _, scores, p = self.decision_forward(self.model, decision, forecast=cfg.forecast)
+        log_q = torch.log_softmax(scores, dim=0)
         action = int(torch.multinomial(log_q.exp().cpu(), 1, generator=generator))
-        decision = Decision(command=obs.commands[action], action=action, prompt_ids=prompt_ids,
-                            reasoning_ids=reasoning, action_context_ids=context, option_ids=options,
-                            behavior_logps=logps + [float(log_q[action])])
-        if cfg.forecast:
+        decision.command, decision.action = obs.commands[action], action
+        decision.behavior_logps = logps + [float(log_q[action])]
+        if p is not None:
             decision.confidence_ids = context + options[action] + self.confidence_prompt_ids
-            decision.p = float(self._forecast(self.model, decision.confidence_ids))
+            decision.p_options = [float(v) for v in p]
+            decision.p = decision.p_options[action]
         return decision
+
+    def _backbone(self, model, ids: torch.Tensor, cache=None, **kwargs):
+        """Transformer body without the output layer. Returns (hidden states, KV cache)."""
+        if cache is not None:
+            kwargs[self._cache_kw] = cache
+        out = model.base_model(input_ids=ids, use_cache=True, **kwargs)
+        return out.last_hidden_state, getattr(out, self._cache_kw)
+
+    @staticmethod
+    def _logprobs(model, hidden: torch.Tensor) -> torch.Tensor:
+        """Output layer + FP32 log-softmax for the given hidden states, shape (rows, vocab). Only ever called on the
+        few positions whose next-token distribution is needed: full-vocabulary logits for a whole context do not
+        fit on a GPU (E0001)."""
+        return torch.log_softmax(model.get_output_embeddings()(hidden).float(), dim=-1)
+
+    @staticmethod
+    def _expand_cache(cache, k: int):
+        """Make a batch-1 KV cache serve k rows. Prefers views (`expand`: no copy of the prefix keys/values) and
+        falls back to the public copying methods when the cache does not expose per-layer keys/values."""
+        layers = getattr(cache, "layers", None)
+        if layers and all(isinstance(getattr(layer, "keys", None), torch.Tensor)
+                          and isinstance(getattr(layer, "values", None), torch.Tensor)
+                          and type(layer).__name__ == "DynamicLayer" for layer in layers):
+            for layer in layers:
+                layer.keys = layer.keys.expand(k, *layer.keys.shape[1:])
+                layer.values = layer.values.expand(k, *layer.values.shape[1:])
+        elif hasattr(cache, "batch_repeat_interleave"):
+            cache.batch_repeat_interleave(k)
+        else:
+            cache.reorder_cache(torch.zeros(k, dtype=torch.long, device=layers[0].keys.device if layers else None))
+        return cache
 
     def _sample_reasoning(self, prompt_ids: list[int], generator: torch.Generator) -> tuple[list[int], list[float]]:
         tokens, logps = [], []
         if self.cfg.max_reasoning_tokens <= 0:
             return tokens, logps
-        out = self.model(input_ids=self._tensor(prompt_ids), use_cache=True)
+        hidden, cache = self._backbone(self.model, self._tensor(prompt_ids))
         for _ in range(self.cfg.max_reasoning_tokens):
-            logprobs = torch.log_softmax(out.logits[0, -1].float(), dim=-1)
+            logprobs = self._logprobs(self.model, hidden[0, -1:])[0]        # last position only
             tok = int(torch.multinomial(logprobs.exp().cpu(), 1, generator=generator))
             tokens.append(tok)
             logps.append(float(logprobs[tok]))
             if tok == self.eos_id or self._ends_with_answer(tokens):
                 break
-            out = self.model(input_ids=self._tensor([tok]), use_cache=True,
-                             **{self._cache_kw: getattr(out, self._cache_kw)})
+            hidden, cache = self._backbone(self.model, self._tensor([tok]), cache)
         return tokens, logps
 
     def _ends_with_answer(self, tokens: list[int]) -> bool:
@@ -137,53 +174,68 @@ class LMPolicy:
 
     # ---------------------------------------------------------------- scoring (differentiable)
 
-    def _option_scores(self, model, context: list[int], options: list[list[int]]) -> torch.Tensor:
-        """l(a^j) = sum of log-probs of option j's tokens after the context, for every option. Shape (K,), FP32."""
-        scores = []
-        n = len(context)
-        for start in range(0, len(options), self.cfg.option_batch_size):
-            chunk = options[start:start + self.cfg.option_batch_size]
-            width = n + max(len(o) for o in chunk)
-            ids = torch.full((len(chunk), width), self.pad_id, dtype=torch.long, device=self.device)
-            mask = torch.zeros_like(ids)
-            for r, opt in enumerate(chunk):
-                ids[r, :n + len(opt)] = torch.tensor(context + opt, device=self.device)
-                mask[r, :n + len(opt)] = 1
-            # Only positions n-1 .. n-2+|a^j| predict option tokens. Run the transformer body on the whole batch
-            # but apply the output layer (and FP32 log-softmax) to those positions alone: full-vocabulary logits
-            # for every context position of every row do not fit on a GPU with a real vocabulary
-            # (16 rows x ~2200 tokens x 152k vocab x 4 bytes = 20 GiB for Qwen).
-            hidden = model.base_model(input_ids=ids, attention_mask=mask).last_hidden_state
-            rows = torch.tensor([r for r, opt in enumerate(chunk) for _ in opt], device=self.device)
-            pos = torch.tensor([n - 1 + k for opt in chunk for k in range(len(opt))], device=self.device)
-            target = torch.tensor([t for opt in chunk for t in opt], device=self.device)
-            logprobs = torch.log_softmax(model.get_output_embeddings()(hidden[rows, pos]).float(), dim=-1)
-            token_lp = logprobs.gather(1, target[:, None])[:, 0]
-            sizes = [len(opt) for opt in chunk]
-            scores.extend(part.sum() for part in token_lp.split(sizes))
-        return torch.stack(scores)
+    def decision_forward(self, model, d: Decision, forecast: bool = False
+                         ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+        """Everything one decision needs from `model`, with a single forward over the shared prefix.
 
-    def _reasoning_logps(self, model, d: Decision) -> torch.Tensor:
-        if not d.reasoning_ids:
-            return torch.zeros(0, device=self.device)
-        n = len(d.prompt_ids)
-        logits = model(input_ids=self._tensor(d.prompt_ids + d.reasoning_ids)).logits[0, n - 1:-1].float()
-        target = torch.tensor(d.reasoning_ids, device=self.device)
-        return torch.log_softmax(logits, dim=-1).gather(1, target[:, None])[:, 0]
+        Returns (reasoning_logps (|c|,), option_scores l(a^j) (K,), p (K,) or None), all FP32. p[j] is the forecast
+        read after option j, i.e. "the probability of winning if a^j is chosen"; p[d.action] is p_t of eq. (5).
 
-    def _forecast(self, model, confidence_ids: list[int]) -> torch.Tensor:
-        logits = model(input_ids=self._tensor(confidence_ids)).logits[0, -1]
-        return yes_no_probability(logits, self.yes_id, self.no_id)
+        With x = d.action_context_ids (length n), every sequence x + y^j shares the hidden states of its first n
+        positions (causal attention), so:
+          1. prefix: x[0:n-1] goes through the transformer once, keeping the KV cache;
+          2. suffixes: K rows r_j = (x[n-1]) + y^j (+ z, the confidence question, when `forecast`), right-padded,
+             run on top of the cache. Appending z does not change l(a^j), again because attention is causal.
+        The logits at position i predict token i + 1, and the output layer is applied only where needed."""
+        x, c, options = d.action_context_ids, d.reasoning_ids, d.option_ids
+        n, n_prompt, k = len(x), len(d.prompt_ids), len(options)
+        # The reasoning tokens are predicted at positions P-1 .. P+|c|-2, which must lie inside the prefix x[0:n-1],
+        # i.e. P + |c| <= n. All three ways the reasoning can end satisfy it: ending with "Answer:" gives
+        # n = P + |c|; a sampled EOS gives n = P + |c| - 1 + |answer|; hitting the token cap gives
+        # n = P + |c| + |answer|. In each case x[0:P+|c|-1] is the prompt followed by c[:-1].
+        assert n >= 2 and n_prompt >= 1 and n_prompt + len(c) <= n, (n_prompt, len(c), n)
+        assert x[:n_prompt + max(len(c) - 1, 0)] == d.prompt_ids + c[:max(len(c) - 1, 0)]
+
+        hidden, cache = self._backbone(model, self._tensor(x[:n - 1]))
+        if c:
+            logprobs = self._logprobs(model, hidden[0, n_prompt - 1:n_prompt + len(c) - 1])
+            target = torch.tensor(c, device=self.device)
+            reasoning_logps = logprobs.gather(1, target[:, None])[:, 0]
+        else:
+            reasoning_logps = torch.zeros(0, device=self.device)
+
+        tail = self.confidence_prompt_ids if forecast else []
+        rows = [[x[n - 1]] + opt + tail for opt in options]
+        width = max(len(r) for r in rows)
+        ids = torch.full((k, width), self.pad_id, dtype=torch.long, device=self.device)
+        mask = torch.zeros((k, n - 1 + width), dtype=torch.long, device=self.device)
+        mask[:, :n - 1] = 1
+        for j, r in enumerate(rows):
+            ids[j, :len(r)] = torch.tensor(r, device=self.device)
+            mask[j, n - 1:n - 1 + len(r)] = 1
+        position_ids = torch.arange(n - 1, n - 1 + width, device=self.device)[None].expand(k, -1)
+        hidden, _ = self._backbone(model, ids, self._expand_cache(cache, k), attention_mask=mask,
+                                   position_ids=position_ids)
+
+        # l_j = sum_{i=1..m_j} log softmax(lm_head(h_{j,i-1}))[y^j_i]; h_{j,0} is the state at x[n-1].
+        row_idx = torch.tensor([j for j, opt in enumerate(options) for _ in opt], device=self.device)
+        pos_idx = torch.tensor([i for opt in options for i in range(len(opt))], device=self.device)
+        target = torch.tensor([t for opt in options for t in opt], device=self.device)
+        token_lp = self._logprobs(model, hidden[row_idx, pos_idx]).gather(1, target[:, None])[:, 0]
+        scores = torch.zeros(k, device=self.device, dtype=token_lp.dtype).index_add(0, row_idx, token_lp)
+
+        p = None
+        if forecast:                      # read at the last real token of every row
+            last = torch.tensor([len(r) - 1 for r in rows], device=self.device)
+            logits = model.get_output_embeddings()(hidden[torch.arange(k, device=self.device), last])
+            p = yes_no_probability(logits, self.yes_id, self.no_id)
+        return reasoning_logps, scores, p
 
     def score(self, d: Decision, model=None, forecast: bool = False) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Log-probabilities of the decision's |c_t| + 1 terms under `model` (default: the policy), plus p_t when
-        `forecast`. Gradients flow when called outside torch.no_grad()."""
+        `forecast`. One call to `decision_forward`; gradients flow when called outside torch.no_grad()."""
         model = self.model if model is None else model
-        log_q = torch.log_softmax(self._option_scores(model, d.action_context_ids, d.option_ids), dim=0)
-        logps = torch.cat([self._reasoning_logps(model, d), log_q[d.action:d.action + 1]])
-        p = None
-        if forecast:
-            if d.confidence_ids is None:
-                d.confidence_ids = d.action_context_ids + d.option_ids[d.action] + self.confidence_prompt_ids
-            p = self._forecast(model, d.confidence_ids)
-        return logps, p
+        reasoning_logps, scores, p = self.decision_forward(model, d, forecast=forecast)
+        log_q = torch.log_softmax(scores, dim=0)
+        logps = torch.cat([reasoning_logps, log_q[d.action:d.action + 1]])
+        return logps, (p[d.action] if p is not None else None)

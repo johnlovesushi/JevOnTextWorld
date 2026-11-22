@@ -10,8 +10,8 @@
 | (1)–(2) | POMDP：隐藏状态 $s_t$、观测 $o_t$、历史 $h_t$、可执行命令 $\mathcal{A}_g(s_t)$ | `jevtw/envs.py`：`Observation`、`KeyChestEnv`（测试用的小 POMDP）、`TextWorldEnv` |
 | (3) | 终局奖励 $z\in\{0,1\}$，只有赢才算 1 | `rollout.Episode.z`；输掉或走满 $H$ 步都是 0 |
 | (4) 上 | 推理 token $c_t\sim\pi^c_\theta$ | `policy.LMPolicy._sample_reasoning`（温度 1、全词表采样，保证采样分布就是 $\pi_\theta$） |
-| (4) 下 | 动作 $a_t\sim q_\theta=\mathrm{softmax}(\ell_\theta(a^j))$ | `policy.LMPolicy._option_scores`：$\ell(a^j)$ = `Answer:` 之后续写 ` j<EOS>` 的对数似然 |
-| (5) | $p_t=\sigma(\ell(\text{yes})-\ell(\text{no}))$ | `readout.yes_no_probability`，在 `policy.LMPolicy._forecast` 中读取 |
+| (4) 下 | 动作 $a_t\sim q_\theta=\mathrm{softmax}(\ell_\theta(a^j))$ | `policy.LMPolicy.decision_forward`：$\ell(a^j)$ = `Answer:` 之后续写 ` j<EOS>` 的对数似然 |
+| (5) | $p_t=\sigma(\ell(\text{yes})-\ell(\text{no}))$ | `readout.yes_no_probability`，在 `policy.LMPolicy.decision_forward` 中读取 |
 | 第 2 节末 | 同一局、同一初始状态下的 $G$ 条轨迹 | `rollout.collect_group`：同一个 `env_seed`，每条轨迹的 `sample_seed` 不同 |
 | (6) | $b_i$、$R_i=z_i+\lambda b_i$ | `rewards.brier_bonus`、`rewards.episode_return`；在 `trainer.assign_returns` 中调用 |
 | (7) | 组内优势 $\widehat A_i$ | `rewards.group_advantages` |
@@ -31,6 +31,25 @@
 **$p_t$ 的读取。** 先在 动作上下文 + 所选选项 ` j<EOS>` 之后接上一句确认问题（默认
 `Question: will you complete the objective? Answer yes or no:`），再读下一个 token 的 yes/no logit。
 这句问题不写进历史，也不影响后续决策。` yes` 和 ` no` 必须各自是单个 token，否则构造策略时直接报错。
+
+**共享前缀的打分（`policy.LMPolicy.decision_forward`，T0001）。** 记动作上下文为 $x$（长度 $n$），选项为 $y^j$
+（长度 $m_j$），确认问题为 $z$。因果注意力下，所有 $x\oplus y^j$ 的前 $n$ 个位置的隐藏状态都相同，
+所以每个决策只做两次前向，同时得到推理 token 的概率、所有 $\ell(a^j)$ 和所有 $p_j$：
+
+1. **前缀**：$x_{0:n-1}$ 过一次主干并保留 KV cache；只在位置 $P-1,\dots,P+\lvert c\rvert-2$（$P$ 是提示词长度）
+   上过输出层，得到 $c_t$ 的 log-prob。推理的三种结束方式都保证 $P+\lvert c\rvert\le n$，即这些位置都在前缀里。
+2. **后缀批**：把 cache 扩成 $K$ 行（用视图 `expand`，不复制前缀的 key/value），第 $j$ 行是
+   $(x_{n-1})\oplus y^j\oplus z$（不需要 $p$ 时不接 $z$），右侧补齐，`position_ids` 从 $n-1$ 开始。
+   $\ell_j=\sum_{i=1}^{m_j}\log\mathrm{softmax}(\text{lm\_head}(h_{j,i-1}))[y^j_i]$，
+   $p_j$ 在第 $j$ 行最后一个真实 token 上读取。后面接 $z$ 不改变 $\ell_j$。
+
+输出层和 FP32 log-softmax 只作用在被读取的位置上（全词表 logits 铺满整个上下文会占满显存，见 E0001）。
+数值和梯度都与“每个量各做一次完整上下文前向”的朴素实现一致，朴素实现保留在
+`tests/test_policy_trainer.py` 里作为参考。`act()` 和 `score()` 各调用它一次。
+
+**`p_options`。** $p_j$ 是“选了 $a^j$ 之后能赢的概率”，即命题 1 里的 $Q_\text{win}(h,c,a^j)$。
+采样时所有 $K$ 个 $p_j$ 都存进 `Decision.p_options`，$p_t$ = `Decision.p` = $p_{a_t}$；
+训练时 `score()` 只返回 $p_{a_t}$。`PolicyConfig.option_batch_size` 自 T0001 起不再使用，只为兼容旧配置而保留。
 
 **$\lambda$ 项只用于奖励，$\alpha$ 项可以求梯度。** $b_i$ 用的是采样时（$\theta_\text{old}$）的 $p_t$，
 所以 $R_i$ 和 $\widehat A_i$ 都与梯度无关。$\alpha\mathcal L_\text{cal}$ 则在训练时重新读取 $p_\theta$，
@@ -72,10 +91,10 @@
    这是恰当评分规则本来的要求，但它和 $\alpha$ 项的直接监督会不会互相冲突，需要做实验验证。
 3. **$p_t$ 的目标会随策略移动**（命题 1）：$p^*$ 是 $\theta_\text{old}$ 下的胜率，策略变强以后，
    旧的 $p_t$ 会系统性地偏悲观。
-4. **效率。** 打分时，每个决策要对 $K_t$ 个选项各做一次带完整上下文的前向（按 `option_batch_size` 分批；
-   输出层和 FP32 log-softmax 只作用在选项 token 所在的位置上，否则全词表 logits 会占满显存），
-   此外还有一次推理前向和一次 $p_t$ 前向；轨迹也是逐条串行采样的。在 GPU 上正式训练之前，
-   值得改成共享前缀的 KV cache，并让多局并行采样。
+4. **效率。** 已完成（T0001）：每个决策的打分只对共享前缀前向一次，再加一个很短的后缀批（见第 2 节），
+   采样 $c_t$ 时的 prefill 也只在最后一个位置过输出层。带梯度时的显存不再随 $K_t\times n$ 增长，
+   但后缀批的注意力仍要为每一行拼出一份长度为 $n$ 的 key/value，所以仍随 $K_t\times n$ 线性占用一部分显存
+   （`scripts/bench_decision.py` 可以测）。剩下的：轨迹仍是逐条串行采样的，多局并行采样是 T0002。
 
 ## 4. 测试
 
@@ -86,4 +105,4 @@
 |---|---|
 | `tests/test_math.py` | (5) 式等于两类 softmax、平移不变性、Brier 对 logit 的梯度；(6) 式的手算例子、任何赢都大于任何输、$\lambda$ 的取值范围；(7) 式；(8)–(9) 式两种归一化的权重，以及逐决策累加的结果等于直接按公式计算；裁剪的 5 种情况；KL；命题 1；配置校验 |
 | `tests/test_envs.py` | KeyChest 的通关路线和部分可观测性；TextWorld 适配器按通关路线能赢、过滤掉的命令不在通关路线上、分数提示已删除、菜谱进入 notes；小模型能在真实 TextWorld 游戏里完成采样 |
-| `tests/test_policy_trainer.py` | 提示词的历史窗口；KV cache 采样的概率等于完整前向打分的概率；动作分布等于对选项的 softmax；无推理模式；同一组共享初始状态且可复现；第一遍的损失等于公式值（两种归一化）；参数确实被更新；$\lambda=\alpha=\beta=0$ 且全组结果相同时不更新；KL 的检查 |
+| `tests/test_policy_trainer.py` | 提示词的历史窗口；KV cache 采样的概率等于打分的概率；共享前缀打分与朴素参考实现的数值、梯度一致（推理的四种结束方式，一位数和两位数选项）；嵌入层和输出层处理的 token 数不超过“一次前缀 + 后缀批”；动作分布等于对选项的 softmax，`p_options` 等于逐选项读出的 $p_j$；无推理模式；同一组共享初始状态且可复现；第一遍的损失等于公式值（两种归一化）；参数确实被更新；$\lambda=\alpha=\beta=0$ 且全组结果相同时不更新；KL 的检查 |
