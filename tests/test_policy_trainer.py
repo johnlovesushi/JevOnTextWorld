@@ -43,6 +43,29 @@ def test_action_distribution_is_softmax_over_options(policy):
     assert d.behavior_logps[-1] == pytest.approx(float(torch.log_softmax(scores, 0)[d.action]), abs=1e-5)
 
 
+def test_option_scores_only_project_option_positions(policy):
+    """Regression (E0001 OOM): scoring must not build full-vocabulary logits for every context position, and the
+    scores must equal the ones read from the full logits."""
+    d = policy.act("goal", [], Observation("room", "nothing", [f"cmd {i}" for i in range(5)]), torch.Generator().manual_seed(2))
+    context, options = d.action_context_ids, d.option_ids + [policy.encode(" 12") + [policy.eos_id]]
+    projected = []
+    hook = policy.model.get_output_embeddings().register_forward_hook(
+        lambda module, args, output: projected.append(output.numel() // output.shape[-1]))
+    try:
+        with torch.no_grad():
+            scores = policy._option_scores(policy.model, context, options)
+    finally:
+        hook.remove()
+    assert sum(projected) == sum(len(o) for o in options) < len(context)
+    n = len(context)
+    with torch.no_grad():
+        for j, opt in enumerate(options):
+            ids = torch.tensor([context + opt])
+            logprobs = torch.log_softmax(policy.model(input_ids=ids).logits[0].float(), dim=-1)
+            expected = sum(logprobs[n - 1 + k, t] for k, t in enumerate(opt))
+            assert scores[j].item() == pytest.approx(expected.item(), abs=1e-4)
+
+
 def test_no_reasoning_mode(tokenizer, policy_cfg):
     cfg = PolicyConfig(**{**policy_cfg.__dict__, "max_reasoning_tokens": 0})
     pol = LMPolicy(tiny_model(seed=1), tokenizer, cfg)
