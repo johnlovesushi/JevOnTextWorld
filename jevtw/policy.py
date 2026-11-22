@@ -5,8 +5,8 @@ sampling law is exactly pi_theta), then picks a_t from q_theta = softmax over th
 logit l(a^j) of option j is the log-likelihood of the continuation " j<EOS>" after "Answer:". Afterwards it can read
 the forecast p_t = sigmoid(l(yes) - l(no)) after a confidence question that is never written into the history.
 
-All three come from `decision_forward`, which runs the shared prefix (the action context) through the transformer
-once and then a short batch of K suffixes "option j + confidence question" on top of its KV cache.
+All three come from one forward in `decision_forward`: the shared prefix (the action context) followed by the K
+suffixes "option j + confidence question", which are kept apart by the attention mask.
 
 Likelihood terms: every sampled reasoning token (its exact ids, including a sampled EOS or the tokens of "Answer:")
 and the single categorical action. Prompts, observations and the forced "Answer:" have none. Token ids are stored
@@ -130,23 +130,6 @@ class LMPolicy:
         fit on a GPU (E0001)."""
         return torch.log_softmax(model.get_output_embeddings()(hidden).float(), dim=-1)
 
-    @staticmethod
-    def _expand_cache(cache, k: int):
-        """Make a batch-1 KV cache serve k rows. Prefers views (`expand`: no copy of the prefix keys/values) and
-        falls back to the public copying methods when the cache does not expose per-layer keys/values."""
-        layers = getattr(cache, "layers", None)
-        if layers and all(isinstance(getattr(layer, "keys", None), torch.Tensor)
-                          and isinstance(getattr(layer, "values", None), torch.Tensor)
-                          and type(layer).__name__ == "DynamicLayer" for layer in layers):
-            for layer in layers:
-                layer.keys = layer.keys.expand(k, *layer.keys.shape[1:])
-                layer.values = layer.values.expand(k, *layer.values.shape[1:])
-        elif hasattr(cache, "batch_repeat_interleave"):
-            cache.batch_repeat_interleave(k)
-        else:
-            cache.reorder_cache(torch.zeros(k, dtype=torch.long, device=layers[0].keys.device if layers else None))
-        return cache
-
     def _sample_reasoning(self, prompt_ids: list[int], generator: torch.Generator) -> tuple[list[int], list[float]]:
         tokens, logps = [], []
         if self.cfg.max_reasoning_tokens <= 0:
@@ -176,16 +159,21 @@ class LMPolicy:
 
     def decision_forward(self, model, d: Decision, forecast: bool = False
                          ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
-        """Everything one decision needs from `model`, with a single forward over the shared prefix.
+        """Everything one decision needs from `model`, from a single forward in which the shared prefix appears once.
 
         Returns (reasoning_logps (|c|,), option_scores l(a^j) (K,), p (K,) or None), all FP32. p[j] is the forecast
         read after option j, i.e. "the probability of winning if a^j is chosen"; p[d.action] is p_t of eq. (5).
 
         With x = d.action_context_ids (length n), every sequence x + y^j shares the hidden states of its first n
-        positions (causal attention), so:
-          1. prefix: x[0:n-1] goes through the transformer once, keeping the KV cache;
-          2. suffixes: K rows r_j = (x[n-1]) + y^j (+ z, the confidence question, when `forecast`), right-padded,
-             run on top of the cache. Appending z does not change l(a^j), again because attention is causal.
+        positions (causal attention). So the K suffixes r_j = (x[n-1]) + y^j (+ z, the confidence question, when
+        `forecast`) are laid end to end after the prefix x[0:n-1] in ONE batch-1 sequence, with
+          * a 4D attention mask: causal inside the prefix; a token of r_j sees the whole prefix and the earlier
+            tokens of r_j, never another option's tokens;
+          * position_ids that restart at n-1 for every r_j.
+        Each token then has exactly the context and position it has in the separate sequence x + y^j + z, so the
+        numbers and gradients are those of K full-context forwards, while keys/values exist once (a batch of K
+        suffix rows on a KV cache would hold K copies of the prefix keys/values per layer: 22 GiB with gradients
+        at n=2200, K=16). Appending z does not change l(a^j), again because attention is causal.
         The logits at position i predict token i + 1, and the output layer is applied only where needed."""
         x, c, options = d.action_context_ids, d.reasoning_ids, d.option_ids
         n, n_prompt, k = len(x), len(d.prompt_ids), len(options)
@@ -196,39 +184,45 @@ class LMPolicy:
         assert n >= 2 and n_prompt >= 1 and n_prompt + len(c) <= n, (n_prompt, len(c), n)
         assert x[:n_prompt + max(len(c) - 1, 0)] == d.prompt_ids + c[:max(len(c) - 1, 0)]
 
-        hidden, cache = self._backbone(model, self._tensor(x[:n - 1]))
+        tail = self.confidence_prompt_ids if forecast else []
+        rows = [[x[n - 1]] + opt + tail for opt in options]
+        starts, total = [], n - 1                       # where each r_j begins in the folded sequence
+        for r in rows:
+            starts.append(total)
+            total += len(r)
+        ids = self._tensor(x[:n - 1] + [t for r in rows for t in r])
+        position_ids = torch.cat([torch.arange(n - 1, device=self.device)]
+                                 + [torch.arange(n - 1, n - 1 + len(r), device=self.device) for r in rows])[None]
+        # segment 0 = prefix, j + 1 = r_j. Query q may attend to key s iff s <= q and s is in the prefix or in q's
+        # own segment.
+        segment = torch.cat([torch.zeros(n - 1, dtype=torch.long, device=self.device)]
+                            + [torch.full((len(r),), j + 1, device=self.device) for j, r in enumerate(rows)])
+        allowed = torch.ones(total, total, dtype=torch.bool, device=self.device).tril()
+        allowed &= (segment[None, :] == 0) | (segment[None, :] == segment[:, None])
+        dtype = next(model.parameters()).dtype
+        mask = torch.zeros(total, total, dtype=dtype, device=self.device).masked_fill(~allowed, torch.finfo(dtype).min)
+        hidden = model.base_model(input_ids=ids, attention_mask=mask[None, None], position_ids=position_ids,
+                                  use_cache=False).last_hidden_state[0]
+
         if c:
-            logprobs = self._logprobs(model, hidden[0, n_prompt - 1:n_prompt + len(c) - 1])
+            logprobs = self._logprobs(model, hidden[n_prompt - 1:n_prompt + len(c) - 1])
             target = torch.tensor(c, device=self.device)
             reasoning_logps = logprobs.gather(1, target[:, None])[:, 0]
         else:
             reasoning_logps = torch.zeros(0, device=self.device)
 
-        tail = self.confidence_prompt_ids if forecast else []
-        rows = [[x[n - 1]] + opt + tail for opt in options]
-        width = max(len(r) for r in rows)
-        ids = torch.full((k, width), self.pad_id, dtype=torch.long, device=self.device)
-        mask = torch.zeros((k, n - 1 + width), dtype=torch.long, device=self.device)
-        mask[:, :n - 1] = 1
-        for j, r in enumerate(rows):
-            ids[j, :len(r)] = torch.tensor(r, device=self.device)
-            mask[j, n - 1:n - 1 + len(r)] = 1
-        position_ids = torch.arange(n - 1, n - 1 + width, device=self.device)[None].expand(k, -1)
-        hidden, _ = self._backbone(model, ids, self._expand_cache(cache, k), attention_mask=mask,
-                                   position_ids=position_ids)
-
         # l_j = sum_{i=1..m_j} log softmax(lm_head(h_{j,i-1}))[y^j_i]; h_{j,0} is the state at x[n-1].
         row_idx = torch.tensor([j for j, opt in enumerate(options) for _ in opt], device=self.device)
-        pos_idx = torch.tensor([i for opt in options for i in range(len(opt))], device=self.device)
+        pos_idx = torch.tensor([starts[j] + i for j, opt in enumerate(options) for i in range(len(opt))],
+                               device=self.device)
         target = torch.tensor([t for opt in options for t in opt], device=self.device)
-        token_lp = self._logprobs(model, hidden[row_idx, pos_idx]).gather(1, target[:, None])[:, 0]
+        token_lp = self._logprobs(model, hidden[pos_idx]).gather(1, target[:, None])[:, 0]
         scores = torch.zeros(k, device=self.device, dtype=token_lp.dtype).index_add(0, row_idx, token_lp)
 
         p = None
-        if forecast:                      # read at the last real token of every row
-            last = torch.tensor([len(r) - 1 for r in rows], device=self.device)
-            logits = model.get_output_embeddings()(hidden[torch.arange(k, device=self.device), last])
-            p = yes_no_probability(logits, self.yes_id, self.no_id)
+        if forecast:                      # read at the last token of every r_j
+            last = torch.tensor([starts[j] + len(r) - 1 for j, r in enumerate(rows)], device=self.device)
+            p = yes_no_probability(model.get_output_embeddings()(hidden[last]), self.yes_id, self.no_id)
         return reasoning_logps, scores, p
 
     def score(self, d: Decision, model=None, forecast: bool = False) -> tuple[torch.Tensor, torch.Tensor | None]:

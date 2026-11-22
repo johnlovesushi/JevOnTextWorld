@@ -137,11 +137,8 @@ def test_decision_forward_work_is_one_prefix_plus_suffixes(policy, forecast):
     finally:
         for h in hooks:
             h.remove()
-    # The suffix batch is right-padded to the longest option (" 12<EOS>" vs " 1<EOS>"), so the embedding layer also
-    # sees max_j m_j - m_j padding tokens per row on top of the real (n-1) + sum_j (1 + m_j + |z|).
-    padding = sum(max(map(len, d.option_ids)) - len(o) for o in d.option_ids)
-    real = (n - 1) + sum(1 + len(o) + (z if forecast else 0) for o in d.option_ids)
-    assert 0 < padding <= len(d.option_ids) and sum(embedded) == real + padding
+    assert len(embedded) == 1                                  # one forward
+    assert sum(embedded) == (n - 1) + sum(1 + len(o) + (z if forecast else 0) for o in d.option_ids)
     assert sum(projected) <= c + sum(len(o) + (1 if forecast else 0) for o in d.option_ids)
     assert sum(embedded) < len(d.option_ids) * n               # the old cost: one full context per option
 
