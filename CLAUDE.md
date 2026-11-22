@@ -68,7 +68,8 @@
 - **版本**：torch 2.14.1（CUDA 13.2）、transformers 5.22.2、textworld 1.7.0、jericho 3.3.1
 - **`HF_HOME`**：`/scratch/$USER/hf_cache`。`Qwen/Qwen3-1.7B` 已下载
   （revision `70d244cc86ccca08cf5af4e1e306ecf908b1ad5e`）。
-- **网络**：模型、pip 包、游戏数据都在登录节点准备好；作业里设了 `HF_HUB_OFFLINE=1`，不依赖计算节点联网。
+- **网络**：计算节点可以联网，但作业一律用离线模式（`HF_HUB_OFFLINE=1`）运行，以保证可复现；
+  模型、pip 包、游戏数据都要先在登录节点准备好。
 - **Slurm**：分区 `gpubase_l40s_b3`（每节点 4 张 L40S、64 核、约 500 GB 内存，时限 24 小时），
   账户 `aip-rjliao`。GPU 任务一律用 Slurm 提交，不在登录节点上跑。
 - **游戏数据**：`data/games/{train,valid,test}`（300 / 40 / 80 局，`scripts/make_games.py` 默认种子 0），

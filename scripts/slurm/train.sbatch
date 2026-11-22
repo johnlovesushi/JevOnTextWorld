@@ -5,8 +5,8 @@
 #
 # Submit from the repository root: stdout and stderr go to runs/slurm/<job name>-<job id>.out, and
 # runs/slurm/ has to exist before sbatch is called (mkdir -p runs/slurm).
-# Compute nodes may have no network, so the model, the pip packages and the games must already be on
-# disk (see "服务器环境" in CLAUDE.md); the job runs with the Hugging Face hub in offline mode.
+# Jobs run with the Hugging Face hub in offline mode for reproducibility, so the model, the pip packages
+# and the games must already be on disk (see "服务器环境" in CLAUDE.md).
 #SBATCH --account=aip-rjliao
 #SBATCH --partition=gpubase_l40s_b3
 #SBATCH --gres=gpu:l40s:1

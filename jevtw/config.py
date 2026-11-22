@@ -21,7 +21,9 @@ class PolicyConfig:
     yes_text: str = " yes"                # must encode to exactly one token
     no_text: str = " no"
     forecast: bool = True                 # compute p_t during rollouts (needed when lam > 0, logged otherwise)
-    option_batch_size: int = 16           # candidate actions scored per forward pass
+    # Ignored since T0001 (all options are scored in one suffix batch on a shared prefix); kept so that old
+    # configuration files still load.
+    option_batch_size: int = 16
 
 
 @dataclass
