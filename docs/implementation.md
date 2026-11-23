@@ -12,7 +12,7 @@
 | (4) 上 | 推理 token $c_t\sim\pi^c_\theta$ | `policy.LMPolicy._sample_reasoning`（温度 1、全词表采样，保证采样分布就是 $\pi_\theta$） |
 | (4) 下 | 动作 $a_t\sim q_\theta=\mathrm{softmax}(\ell_\theta(a^j))$ | `policy.LMPolicy.decision_forward`：$\ell(a^j)$ = `Answer:` 之后续写 ` j<EOS>` 的对数似然 |
 | (5) | $p_t=\sigma(\ell(\text{yes})-\ell(\text{no}))$ | `readout.yes_no_probability`，在 `policy.LMPolicy.decision_forward` 中读取 |
-| 第 2 节末 | 同一局、同一初始状态下的 $G$ 条轨迹 | `rollout.collect_group`：同一个 `env_seed`，每条轨迹的 `sample_seed` 不同 |
+| 第 2 节末 | 同一局、同一初始状态下的 $G$ 条轨迹 | `train.py` 里同一局的 $G$ 个任务共用 `env_seed`，`sample_seed` 各不相同，由 `rollout.collect_batch` 采样 |
 | (6) | $b_i$、$R_i=z_i+\lambda b_i$ | `rewards.brier_bonus`、`rewards.episode_return`；在 `trainer.assign_returns` 中调用 |
 | (7) | 组内优势 $\widehat A_i$ | `rewards.group_advantages` |
 | (8) | 裁剪的 GRPO 损失，除以 $N=\sum(\lvert c\rvert+1)$ | `losses.clipped_surrogate`、`losses.policy_weights(..., "token")` |
@@ -97,8 +97,41 @@
    这是恰当评分规则本来的要求，但它和 $\alpha$ 项的直接监督会不会互相冲突，需要做实验验证。
 3. **$p_t$ 的目标会随策略移动**（命题 1）：$p^*$ 是 $\theta_\text{old}$ 下的胜率，策略变强以后，
    旧的 $p_t$ 会系统性地偏悲观。
-4. **效率。** 已完成（T0001）：每个决策的打分只对共享前缀前向一次，所有选项的后缀接在同一条序列里（见第 2 节），
-   采样 $c_t$ 时的 prefill 也只在最后一个位置过输出层。带梯度时的显存相当于一条长度 $n+\sum_j(1+m_j+\lvert z\rvert)$ 的序列（`scripts/bench_decision.py` 可以测）。剩下的：轨迹仍是逐条串行采样的，多局并行采样是 T0002。
+4. **效率。** 已完成：
+   - T0001：每个决策的打分只对共享前缀前向一次，所有选项的后缀接在同一条序列里（见第 2 节），
+     采样 $c_t$ 时的 prefill 也只在最后一个位置过输出层。带梯度时的显存相当于一条长度
+     $n+\sum_j(1+m_j+\lvert z\rvert)$ 的序列（`scripts/bench_decision.py` 可以测）。
+   - T0002：`rollout.collect_batch` 让最多 `grpo.parallel_episodes` 条轨迹同步推进，推理 $c_t$ 批量生成
+     （`LMPolicy.sample_reasoning_batch`），训练和评测都用它（`scripts/bench_rollout.py` 可以测）。见下面一段。
+
+   剩下的：选项打分（`decision_forward`）和参数更新仍是逐个决策进行的。
+
+**批量采样（T0002）。** 每个同步步骤：为所有进行中的轨迹构造 prompt → 批量生成推理 → 每条轨迹调用一次
+`decision_forward` 打分、采样动作、读 $p_t$ → 依次 `env.step`。有轨迹结束就由排队中的下一条补上。
+采样分布仍然严格是 $\pi_\theta$：
+
+- prompt **左侧补齐**，补齐位置被 `attention_mask` 屏蔽，`position_ids = cumsum(mask) - 1`，
+  所以每个真实 token 的上下文和位置与不补齐时相同；batch 内各行之间本来就互不可见。
+- 每行各自判断停止（EOS、以 `Answer:` 结尾、达到 `max_reasoning_tokens`）。已停止的行继续喂 pad，
+  但 mask 为 0，输出被丢弃。
+- 每条轨迹有自己的环境实例和自己的 `torch.Generator`（建在模型所在设备上，种子是 `sample_seed`），
+  逐行 `torch.multinomial`，温度 1，全词表。所以一条轨迹采到什么，不取决于旁边跑的是哪些轨迹
+  （批量计算带来的浮点误差除外：在 bf16 下，同一个种子在不同 `parallel` 下可能走出不同的轨迹，
+  但每条都是 $\pi_\theta$ 的合法样本）。
+- `run_episode` 是逐条执行的参考实现，它用 CPU 上的 generator。在 CPU 上，`parallel=1` 的
+  `collect_batch` 与它逐 token 相同；在 GPU 上两者的随机数流不同（设备端 generator）。
+
+**批量采样的显存。** 生成推理时的 KV cache 约为 并行数 × 序列长度 × 每 token 约 114 KB
+（Qwen3-1.7B：28 层 × key 和 value 两份 × 8 个 KV 头 × head_dim 128 × bf16 的 2 字节 = 114,688 字节）。
+序列长度是 batch 里最长的 prompt 加上已生成的 token 数。例如 32 条 × 2,400 token ≈ 8.2 GiB，
+64 条就是它的两倍，所以带推理时 `parallel_episodes` 不能随意调大；无推理（`max_reasoning_tokens=0`）时
+不生成、不建 cache，这一项为 0。
+
+**采样指标。** 训练行和评测行都记录：`gen_s` / `score_s` / `env_s` / `prompt_s`（生成推理、打分、
+环境、构造 prompt 各自的秒数；`env_s` 包含创建和重置环境）、`sec_per_decision`（采样墙钟时间 ÷ 决策数，
+不含参数更新）、`mean_reasoning_tokens`、`reasoning_end_answer` / `reasoning_end_eos` / `reasoning_end_cap`
+（推理以 `Answer:` 结束、以 EOS 结束、达到上限被截断的比例）和 `mean_options`（$\bar K$）。
+截断比例超过 0.5 时 `scripts/summarize_run.py` 会报警。
 
 ## 4. 测试
 
@@ -109,4 +142,5 @@
 |---|---|
 | `tests/test_math.py` | (5) 式等于两类 softmax、平移不变性、Brier 对 logit 的梯度；(6) 式的手算例子、任何赢都大于任何输、$\lambda$ 的取值范围；(7) 式；(8)–(9) 式两种归一化的权重，以及逐决策累加的结果等于直接按公式计算；裁剪的 5 种情况；KL；命题 1；配置校验 |
 | `tests/test_envs.py` | KeyChest 的通关路线和部分可观测性；TextWorld 适配器按通关路线能赢、过滤掉的命令不在通关路线上、分数提示已删除、菜谱进入 notes；小模型能在真实 TextWorld 游戏里完成采样 |
+| `tests/test_batched_rollout.py` | 批量生成推理（prompt 长度各不相同、三种结束方式都出现）记录的概率等于 `score()`；同一行单独采样和放在 batch 里采样结果相同；`parallel=1` 的 `collect_batch` 与 `run_episode` 完全相同；同样的种子可复现；任务多于并行数时输出顺序和内容正确、同时打开的环境不超过并行数、出错时环境被关闭；无推理模式；TextWorld |
 | `tests/test_policy_trainer.py` | 提示词的历史窗口；KV cache 采样的概率等于打分的概率；共享前缀打分与朴素参考实现的数值、梯度一致（推理的四种结束方式，一位数和两位数选项）；嵌入层和输出层处理的 token 数等于“一次前缀 + 各选项后缀”；动作分布等于对选项的 softmax，`p_options` 等于逐选项读出的 $p_j$；无推理模式；同一组共享初始状态且可复现；第一遍的损失等于公式值（两种归一化）；参数确实被更新；$\lambda=\alpha=\beta=0$ 且全组结果相同时不更新；KL 的检查 |

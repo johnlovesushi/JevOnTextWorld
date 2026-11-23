@@ -5,7 +5,8 @@
   -> reports/E0001a.md (for people) and reports/E0001a.json (for comparing runs)
 
 Every report has the same sections, so runs can be compared without reading logs. The script flags anomalies
-automatically (non-finite loss, no learning signal, large sampling/training mismatch, heavy clipping, incomplete run).
+automatically (non-finite loss, no learning signal, large sampling/training mismatch, heavy clipping, truncated reasoning,
+incomplete run).
 Standard library only."""
 from __future__ import annotations
 
@@ -19,10 +20,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WINDOW = 10                               # batches averaged at the start and end of training
 TRAIN_KEYS = ("win_rate", "mean_return", "mean_bonus", "mixed_groups", "active_groups", "mean_length",
-              "mean_forecast", "decisions", "reasoning_tokens", "rollout_s", "update_s")
+              "mean_forecast", "decisions", "reasoning_tokens", "rollout_s", "update_s",
+              "gen_s", "score_s", "env_s", "prompt_s", "mean_reasoning_tokens", "reasoning_end_answer",
+              "reasoning_end_eos", "reasoning_end_cap", "mean_options")
+SAMPLING_KEYS = ("sec_per_decision", "gen_s", "score_s", "env_s", "prompt_s", "mean_reasoning_tokens",
+                 "reasoning_end_answer", "reasoning_end_eos", "reasoning_end_cap", "mean_options")
 PASS_KEYS = ("loss", "grad_norm", "clip_frac", "kl", "cal_loss")
 LOGP_DIFF_WARN = 0.05
 CLIP_WARN = 0.2
+CAP_WARN = 0.5                            # fraction of reasonings cut off at max_reasoning_tokens
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -47,9 +53,11 @@ def window_stats(rows: list[dict]) -> dict:
     for k in PASS_KEYS:
         out[f"first_pass_{k}"] = mean([r["passes"][0].get(k) for r in rows if r.get("passes")])
         out[f"last_pass_{k}"] = mean([r["passes"][-1].get(k) for r in rows if r.get("passes")])
-    secs = sum((r.get("rollout_s") or 0) + (r.get("update_s") or 0) for r in rows)
     decisions = sum(r.get("decisions") or 0 for r in rows)
-    out["sec_per_decision"] = secs / decisions if decisions else None
+    rollout = sum(r.get("rollout_s") or 0 for r in rows)
+    update = sum(r.get("update_s") or 0 for r in rows)
+    out["sec_per_decision"] = rollout / decisions if decisions else None                 # sampling only
+    out["sec_per_decision_with_update"] = (rollout + update) / decisions if decisions else None
     out["batches"] = [rows[0]["batch"], rows[-1]["batch"]] if rows else None
     return out
 
@@ -98,6 +106,13 @@ def summarize(run_dir: Path, run_id: str, title: str) -> dict:
     clip = mean([r["passes"][-1].get("clip_frac") for r in train if r.get("passes")])
     if clip is not None and clip > CLIP_WARN:
         anomalies.append(f"mean last-pass clip fraction {clip:.2f} > {CLIP_WARN}")
+    cap = mean([r.get("reasoning_end_cap") for r in train])
+    if cap is not None and cap > CAP_WARN:
+        anomalies.append(f"training: {cap:.2f} of the reasonings hit max_reasoning_tokens (> {CAP_WARN})")
+    for r in val:
+        if (r.get("reasoning_end_cap") or 0) > CAP_WARN:
+            anomalies.append(f"validation at batch {r['batch']}: {r['reasoning_end_cap']:.2f} of the reasonings hit "
+                             f"max_reasoning_tokens (> {CAP_WARN})")
     if not val:
         anomalies.append("no validation evaluation recorded")
 
@@ -110,7 +125,7 @@ def summarize(run_dir: Path, run_id: str, title: str) -> dict:
         "progress": {"batches_done": len(train), "batches_planned": planned,
                      "last_batch": train[-1]["batch"] if train else None},
         "val": [{k: r.get(k) for k in ("batch", "win_rate", "forecast_brier", "mean_forecast", "mean_length",
-                                       "episodes", "eval_s")} for r in val],
+                                       "episodes", "eval_s") + SAMPLING_KEYS} for r in val],
         "train_first": window_stats(train[:WINDOW]) if train else None,
         "train_last": window_stats(train[-WINDOW:]) if train else None,
         "gpu_peak_gb": max(peaks) if peaks else None,
@@ -149,6 +164,13 @@ def markdown(s: dict, log_tail: str | None, notes: str | None) -> str:
               "|---|---|---|---|---|---|---|"]
     lines += [f"| {v['batch']} | {fmt(v['win_rate'])} | {fmt(v['forecast_brier'])} | {fmt(v['mean_forecast'])} | "
               f"{fmt(v['mean_length'])} | {fmt(v['episodes'])} | {fmt(v['eval_s'])} |" for v in s["val"]]
+    if any(v.get("sec_per_decision") is not None for v in s["val"]):
+        lines += ["", "Sampling during validation (seconds are totals for the evaluation; the reasoning columns are "
+                  "the mean token count and the fractions ending with the answer prefix / EOS / the token cap):", "",
+                  "| batch | s / decision | gen s | score s | env s | prompt s | reasoning tokens | answer | eos | "
+                  "cap | mean options |", "|---|---|---|---|---|---|---|---|---|---|---|"]
+        lines += ["| " + " | ".join([str(v["batch"])] + [fmt(v.get(k)) for k in SAMPLING_KEYS]) + " |"
+                  for v in s["val"]]
     first, last = s["train_first"], s["train_last"]
     if first:
         lines += ["", f"## Training (mean over the first and last {WINDOW} batches)", "",

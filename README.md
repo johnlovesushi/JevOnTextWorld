@@ -27,7 +27,7 @@ jevtw/
   readout.py     (5) 式
   rewards.py     (6)–(7) 式
   losses.py      (8)–(9) 式与 KL；token / episode 两种归一化
-  rollout.py     Episode、run_episode、collect_group
+  rollout.py     Episode、collect_batch（多条轨迹同步推进）、run_episode（逐条执行的参考实现）
   trainer.py     一次 GRPO 更新
   train.py       训练循环与评测（含 --smoke CPU 冒烟）
   testing.py     字节分词器 + 随机小模型（测试用，不需要下载）

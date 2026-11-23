@@ -30,9 +30,14 @@ def test_smoke_run_report(tmp_path):
     assert [v["batch"] for v in summary["val"]] == [0, 2, 3]
     assert summary["non_default_config"]["grpo"]["lam"] == 0.5
     assert summary["train_last"]["sec_per_decision"] > 0
-    assert summary["anomalies"] == []
+    assert summary["train_last"]["sec_per_decision_with_update"] > summary["train_last"]["sec_per_decision"]
+    for row in summary["val"]:
+        assert row["sec_per_decision"] > 0 and row["mean_options"] >= 4
+        assert row["reasoning_end_answer"] + row["reasoning_end_eos"] + row["reasoning_end_cap"] == 1
+    # A random model never writes "Answer:", so nearly every reasoning runs into the token cap: the report says so.
+    assert summary["anomalies"] and all("hit max_reasoning_tokens" in a for a in summary["anomalies"])
     md = (out / "T0001.md").read_text()
-    for section in ("## Anomalies", "## Validation", "## Training", "## Log tail", "## Executor notes"):
+    for section in ("## Anomalies", "## Validation", "Sampling during validation", "## Training", "## Log tail", "## Executor notes"):
         assert section in md
     assert "line 79" in md and "line 29" not in md and "Ran as specified." in md
 

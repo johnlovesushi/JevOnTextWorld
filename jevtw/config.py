@@ -45,6 +45,7 @@ class GRPOConfig:
     learning_rate: float = 2e-6
     weight_decay: float = 0.0
     grad_clip: float = 1.0
+    parallel_episodes: int = 32           # episodes advanced in lockstep while sampling (training and evaluation)
 
     def __post_init__(self):
         if not 0.0 <= self.lam < 1.0:
@@ -53,6 +54,8 @@ class GRPOConfig:
             raise ValueError("alpha and beta must be non-negative")
         if self.normalization not in NORMALIZATIONS:
             raise ValueError(f"normalization must be one of {NORMALIZATIONS}, got {self.normalization!r}")
+        if self.parallel_episodes < 1:
+            raise ValueError("parallel_episodes must be at least 1")
         if self.group_size < 2:
             raise ValueError("group_size must be at least 2 for group-relative advantages")
 

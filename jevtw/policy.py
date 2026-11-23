@@ -96,18 +96,29 @@ class LMPolicy:
     @torch.no_grad()
     def act(self, objective: str, history: Sequence[tuple[str, str]], obs: Observation,
             generator: torch.Generator) -> Decision:
+        """One decision for one episode (the serial reference; `rollout.collect_batch` uses the three steps below
+        with `sample_reasoning_batch` in place of `_sample_reasoning`)."""
+        prompt_ids = self.encode_prompt(objective, history, obs)
+        reasoning, logps = self._sample_reasoning(prompt_ids, generator)
+        return self.decide(prompt_ids, reasoning, logps, obs, generator)
+
+    def encode_prompt(self, objective: str, history: Sequence[tuple[str, str]], obs: Observation) -> list[int]:
         if not obs.commands:
             raise ValueError("no admissible commands")
+        return self.encode(build_prompt(objective, history, obs, self.cfg))
+
+    @torch.no_grad()
+    def decide(self, prompt_ids: list[int], reasoning: list[int], logps: list[float], obs: Observation,
+               generator: torch.Generator) -> Decision:
+        """Score the options after the sampled reasoning, sample a_t ~ q and read p_t."""
         cfg = self.cfg
-        prompt_ids = self.encode(build_prompt(objective, history, obs, cfg))
-        reasoning, logps = self._sample_reasoning(prompt_ids, generator)
         context = self._action_context(prompt_ids, reasoning)
         options = [self.encode(f" {j + 1}") + [self.eos_id] for j in range(len(obs.commands))]
         decision = Decision(command="", action=-1, prompt_ids=prompt_ids, reasoning_ids=reasoning,
                             action_context_ids=context, option_ids=options, behavior_logps=[])
         _, scores, p = self.decision_forward(self.model, decision, forecast=cfg.forecast)
         log_q = torch.log_softmax(scores, dim=0)
-        action = int(torch.multinomial(log_q.exp().cpu(), 1, generator=generator))
+        action = int(torch.multinomial(log_q.exp().to(generator.device), 1, generator=generator))
         decision.command, decision.action = obs.commands[action], action
         decision.behavior_logps = logps + [float(log_q[action])]
         if p is not None:
@@ -137,13 +148,67 @@ class LMPolicy:
         hidden, cache = self._backbone(self.model, self._tensor(prompt_ids))
         for _ in range(self.cfg.max_reasoning_tokens):
             logprobs = self._logprobs(self.model, hidden[0, -1:])[0]        # last position only
-            tok = int(torch.multinomial(logprobs.exp().cpu(), 1, generator=generator))
+            tok = int(torch.multinomial(logprobs.exp().to(generator.device), 1, generator=generator))
             tokens.append(tok)
             logps.append(float(logprobs[tok]))
             if tok == self.eos_id or self._ends_with_answer(tokens):
                 break
             hidden, cache = self._backbone(self.model, self._tensor([tok]), cache)
         return tokens, logps
+
+    @torch.no_grad()
+    def sample_reasoning_batch(self, prompts: Sequence[list[int]], generators: Sequence[torch.Generator]
+                               ) -> list[tuple[list[int], list[float]]]:
+        """`_sample_reasoning` for several episodes at once: (tokens, log-probs) per prompt, in order.
+
+        Row i is sampled from exactly pi_theta(. | prompt_i, its own earlier tokens) with its own generator:
+          * prompts are LEFT-padded, so the last column is the last prompt token of every row; pads are masked out
+            and position_ids = cumsum(mask) - 1 gives every real token the position it has in the unpadded prompt;
+          * rows of a batch never attend to each other, so a row's logits depend on nothing but its own tokens;
+          * each row stops on its own (EOS, ends with "Answer:", or the cap). A stopped row keeps being fed a pad
+            token with attention mask 0 so that the batch stays rectangular; its outputs are discarded.
+        KV cache: rows x (longest prompt + generated tokens) x layers x 2 x kv_heads x head_dim values."""
+        b = len(prompts)
+        tokens: list[list[int]] = [[] for _ in range(b)]
+        logps: list[list[float]] = [[] for _ in range(b)]
+        cap = self.cfg.max_reasoning_tokens
+        if cap <= 0 or b == 0:
+            return list(zip(tokens, logps))
+        device, width = self.device, max(len(p) for p in prompts)
+        ids = torch.full((b, width), self.pad_id, dtype=torch.long, device=device)
+        mask = torch.zeros((b, width), dtype=torch.long, device=device)
+        for i, prompt in enumerate(prompts):
+            ids[i, width - len(prompt):] = torch.tensor(prompt, dtype=torch.long, device=device)
+            mask[i, width - len(prompt):] = 1
+        hidden, cache = self._backbone(self.model, ids, attention_mask=mask,
+                                       position_ids=(mask.cumsum(1) - 1).clamp(min=0))
+        next_pos = mask.sum(1)                                   # position of the next real token of every row
+        alive = list(range(b))
+        for step in range(cap):
+            logprobs = self._logprobs(self.model, hidden[alive, -1])            # last position only
+            probs = logprobs.exp()
+            drawn = torch.stack([torch.multinomial(probs[r].to(generators[i].device), 1, generator=generators[i])[0]
+                                 for r, i in enumerate(alive)]).to(device)
+            drawn_lp = logprobs.gather(1, drawn[:, None])[:, 0]
+            still = []
+            for i, tok, lp in zip(alive, drawn.tolist(), drawn_lp.tolist()):
+                tokens[i].append(tok)
+                logps[i].append(lp)
+                if not (tok == self.eos_id or self._ends_with_answer(tokens[i])):
+                    still.append(i)
+            alive = still
+            if not alive or step == cap - 1:
+                break
+            feed = torch.full((b, 1), self.pad_id, dtype=torch.long, device=device)
+            keep = torch.zeros((b, 1), dtype=torch.long, device=device)
+            rows = torch.tensor(alive, device=device)
+            feed[rows, 0] = torch.tensor([tokens[i][-1] for i in alive], dtype=torch.long, device=device)
+            keep[rows, 0] = 1
+            mask = torch.cat([mask, keep], dim=1)
+            hidden, cache = self._backbone(self.model, feed, cache, attention_mask=mask,
+                                           position_ids=next_pos[:, None])
+            next_pos = next_pos + keep[:, 0]
+        return list(zip(tokens, logps))
 
     def _ends_with_answer(self, tokens: list[int]) -> bool:
         tail = self.tokenizer.decode(tokens[-16:])
