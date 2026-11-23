@@ -124,7 +124,8 @@ def summarize(run_dir: Path, run_id: str, title: str) -> dict:
         "non_default_config": non_default(config),
         "progress": {"batches_done": len(train), "batches_planned": planned,
                      "last_batch": train[-1]["batch"] if train else None},
-        "val": [{k: r.get(k) for k in ("batch", "win_rate", "forecast_brier", "mean_forecast", "mean_length",
+        "val": [{k: r.get(k) for k in ("batch", "win_rate", "forecast_brier", "forecast_brier_const", "mean_forecast",
+                                       "mean_length",
                                        "episodes", "eval_s") + SAMPLING_KEYS} for r in val],
         "train_first": window_stats(train[:WINDOW]) if train else None,
         "train_last": window_stats(train[-WINDOW:]) if train else None,
@@ -160,9 +161,10 @@ def markdown(s: dict, log_tail: str | None, notes: str | None) -> str:
              "## Anomalies", ""]
     lines += [f"- {a}" for a in s["anomalies"]] or ["- none detected"]
     lines += ["", "## Validation", "",
-              "| batch | win rate | forecast Brier | mean p_t | mean length | episodes | eval s |",
-              "|---|---|---|---|---|---|---|"]
-    lines += [f"| {v['batch']} | {fmt(v['win_rate'])} | {fmt(v['forecast_brier'])} | {fmt(v['mean_forecast'])} | "
+              "| batch | win rate | forecast Brier | constant-forecast Brier w(1-w) | mean p_t | mean length | episodes | "
+              "eval s |", "|---|---|---|---|---|---|---|---|"]
+    lines += [f"| {v['batch']} | {fmt(v['win_rate'])} | {fmt(v['forecast_brier'])} | {fmt(v.get('forecast_brier_const'))} | "
+              f"{fmt(v['mean_forecast'])} | "
               f"{fmt(v['mean_length'])} | {fmt(v['episodes'])} | {fmt(v['eval_s'])} |" for v in s["val"]]
     if any(v.get("sec_per_decision") is not None for v in s["val"]):
         lines += ["", "Sampling during validation (seconds are totals for the evaluation; the reasoning columns are "

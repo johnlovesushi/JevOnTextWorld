@@ -1,0 +1,105 @@
+{
+ "id": "E0003a",
+ "title": "Difficulty probe on L0 (no skills): initial win rate 0.31, chosen difficulty",
+ "run_dir": "runs/E0003a",
+ "generated": "2026-11-23T15:10:16-0500",
+ "meta": {
+  "commit": "4d9f09401bda86f81b397f84beefd8deedd85365",
+  "dirty": false,
+  "branch": "exp/E0003-easy-games",
+  "host": "kn148",
+  "python": "3.12.4",
+  "torch": "2.14.1",
+  "transformers": "5.22.2",
+  "cuda_device": "NVIDIA L40S",
+  "started": "2026-11-23T12:27:56-0500"
+ },
+ "args": {
+  "config": "configs/experiments/E0003-probe.json",
+  "model": "Qwen/Qwen3-1.7B",
+  "revision": null,
+  "train_games": "data/games_L0/train",
+  "val_games": "data/games_L0/valid",
+  "val_limit": null,
+  "out": "runs/E0003a",
+  "batches": 0,
+  "eval_every": 50,
+  "eval_seeds": [
+   17,
+   23,
+   29
+  ],
+  "seed": 17,
+  "no_save": false,
+  "smoke": false
+ },
+ "config": {
+  "policy": {
+   "max_reasoning_tokens": 0,
+   "reasoning_prefix": "Reasoning:",
+   "answer_prefix": "Answer:",
+   "history_window": 8,
+   "confidence_prompt": "\nQuestion: will you complete the objective? Answer yes or no:",
+   "yes_text": " yes",
+   "no_text": " no",
+   "forecast": true,
+   "option_batch_size": 16
+  },
+  "grpo": {
+   "games_per_batch": 4,
+   "group_size": 8,
+   "max_actions": 30,
+   "lam": 0.0,
+   "alpha": 0.0,
+   "beta": 0.0,
+   "clip_eps": 0.2,
+   "adv_delta": 1e-08,
+   "normalization": "token",
+   "optimization_passes": 2,
+   "learning_rate": 2e-06,
+   "weight_decay": 0.0,
+   "grad_clip": 1.0,
+   "parallel_episodes": 32
+  }
+ },
+ "non_default_config": {
+  "policy": {
+   "max_reasoning_tokens": 0
+  },
+  "grpo": {
+   "max_actions": 30
+  }
+ },
+ "progress": {
+  "batches_done": 0,
+  "batches_planned": 0,
+  "last_batch": null
+ },
+ "val": [
+  {
+   "batch": 0,
+   "win_rate": 0.30833333333333335,
+   "forecast_brier": 0.7751679362431041,
+   "forecast_brier_const": 0.2132638888888889,
+   "mean_forecast": 0.9999816447135902,
+   "mean_length": 8.266666666666667,
+   "episodes": 120,
+   "eval_s": 69.05,
+   "sec_per_decision": 0.06960178166627884,
+   "gen_s": 0.002,
+   "score_s": 52.272,
+   "env_s": 14.184,
+   "prompt_s": 2.588,
+   "mean_reasoning_tokens": 0.0,
+   "reasoning_end_answer": null,
+   "reasoning_end_eos": null,
+   "reasoning_end_cap": null,
+   "mean_options": 14.586693548387096
+  }
+ ],
+ "train_first": null,
+ "train_last": null,
+ "gpu_peak_gb": null,
+ "max_sampling_vs_old_logp_diff": null,
+ "anomalies": []
+}
