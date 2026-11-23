@@ -1,0 +1,2 @@
+{"policy": {"max_reasoning_tokens": 0, "history_window": 8, "forecast": true},
+ "grpo": {"max_actions": 30}}

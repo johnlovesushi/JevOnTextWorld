@@ -54,12 +54,15 @@ python -m jevtw.train --smoke --out runs/smoke  # CPU 冒烟：随机小模型 +
 
 # 生成游戏并训练（GPU）
 python scripts/make_games.py --out data/games --train 300 --valid 40 --test 80
+# 简单难度：--skills 选择游戏需要的技能（open / cook / cut，默认全有，不带值表示都不要），--name 是文件名前缀
+python scripts/make_games.py --out data/games_L0 --name L0 --recipe 1 --take 1 --go 1 --skills
 python -m jevtw.train --config configs/grpo_calibrated.json --model Qwen/Qwen3-1.7B \
     --train-games data/games/train --val-games data/games/valid --out runs/grpo_cal
 ```
 
 `runs/<name>/metrics.jsonl` 每个 batch 记录一行：胜率、平均回报、$b_i$、有胜有负的组数、
 有非零优势的组数、平均 $p_t$、每一遍的损失、梯度范数、裁剪比例、KL、校准损失。
-评测行另外记录 `forecast_brier`，也就是 $p_t$ 相对最终结果 $z$ 的 Brier 分数。
+评测行另外记录 `forecast_brier`，也就是 $p_t$ 相对最终结果 $z$ 的 Brier 分数；以及 `forecast_brier_const` $= w(1-w)$
+（$w$ 是这次评测的胜率），即“永远预测 $w$”的 Brier 分数，作为参照。
 
 > 当前状态：CPU 测试和冒烟测试都通过了；还没有在 GPU 上用真实模型训练过。

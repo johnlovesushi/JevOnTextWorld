@@ -68,9 +68,13 @@ def evaluate(policy: LMPolicy, games, seeds, max_actions: int, parallel: int = 1
     episodes = collect_batch(policy, jobs, max_actions, parallel, stats)
     sampling = rollout_metrics(episodes, stats, time.time() - start, policy.eos_id)
     pairs = [(d.p, ep.z) for ep in episodes for d in ep.decisions if d.p is not None]
-    return {"episodes": len(episodes), "win_rate": sum(ep.z for ep in episodes) / len(episodes),
+    win_rate = sum(ep.z for ep in episodes) / len(episodes)
+    return {"episodes": len(episodes), "win_rate": win_rate,
             "mean_length": sum(ep.length for ep in episodes) / len(episodes),
             "forecast_brier": (sum((p - z) ** 2 for p, z in pairs) / len(pairs)) if pairs else None,
+            # Brier score of always forecasting the win rate w of this evaluation: w (1 - w). Reference for the line
+            # above (which averages over decisions, so the two differ slightly in weighting when lengths differ).
+            "forecast_brier_const": win_rate * (1 - win_rate) if pairs else None,
             "mean_forecast": (sum(p for p, _ in pairs) / len(pairs)) if pairs else None,
             **sampling}
 
