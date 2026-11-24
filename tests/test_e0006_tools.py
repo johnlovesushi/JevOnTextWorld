@@ -180,3 +180,48 @@ def test_script_variants_are_scored(game):
     assert {r["variant"] for r in rows} == {"V2", "V6", "V9"} and {r["history_mode"] for r in rows} == {"feedback"}
     by = {(r["t"], r["variant"]): r for r in rows}
     assert by[1, "V6"]["prompt_tokens"] < by[1, "V2"]["prompt_tokens"] < by[1, "V9"]["prompt_tokens"]
+
+
+def test_parts_put_back_pieces_of_the_full_observation(game):
+    import diagnose_history as dh
+
+    states = [s for s in dh.walk(game) if not isinstance(s, dict)]
+    feedback, full = dh.variant_config("V2"), dh.variant_config("V1")
+    assert len(states) > 2
+    for t, objective, history, obs, a_star in states:
+        pieces = dh.split_observation(obs)
+        assert "\n\n".join(v for v in pieces.values() if v) == obs.text      # nothing lost, nothing added
+        assert pieces["inventory"].startswith("Inventory: ") and pieces["notes"][:7] in ("", "Notes:\n")
+        # all three pieces: the prompt of history_mode "full"; none: the prompt of "feedback"
+        assert dh.script_prompt(objective, history, obs, feedback, parts=dh.PARTS) == \
+            build_prompt(objective, history, obs, full)
+        base = build_prompt(objective, history, obs, feedback)
+        prompts = {n: dh.variant_prompt(n, objective, history, obs, dh.variant_config(n))
+                   for n in ("V10", "V11", "V12", "V13", "V14")}
+        if t == 0:
+            assert set(prompts.values()) == {base}
+            continue
+        past = base[:base.index("Current observation:")]
+        for name, prompt in prompts.items():
+            parts = dh.SCRIPT_VARIANTS[name]["parts"]
+            assert prompt.endswith(base[base.index("Current observation:"):])   # the current observation is as before
+            mine = prompt[:prompt.index("Current observation:")]
+            assert len(mine) > len(past) and mine.count("\n> ") == past.count("\n> ")
+            assert (mine.count("Inventory: ") == min(t, 8)) == ("inventory" in parts)
+            assert ("-= " in mine) == ("room" in parts)
+            assert mine.count("Notes:\n") == (sum(bool(dh.split_observation(a)["notes"]) for _, a in history[-8:])
+                                              if "notes" in parts else 0)
+    assert any(dh.split_observation(a)["notes"] for _, a in states[-1][2])     # the recipe was read on this walk
+    out = io.StringIO()
+    dh.run(tiny_model(seed=0), ByteTokenizer(), "tiny", {"L": game.parent}, out, None, ("V2", "V10", "V13"),
+           yes_text="Y", no_text="N")
+    rows = [json.loads(line) for line in out.getvalue().splitlines() if "end" not in json.loads(line)]
+    by = {(r["t"], r["variant"]): r for r in rows}
+    last = max(t for t, _ in by)
+    assert by[last, "V2"]["prompt_tokens"] < by[last, "V10"]["prompt_tokens"] < by[last, "V13"]["prompt_tokens"]
+
+
+def test_variants_are_ordered_by_number():
+    import analyze_history as ah
+
+    assert sorted(["V10", "V2", "V1", "V7"], key=ah.variant_key) == ["V1", "V2", "V7", "V10"]

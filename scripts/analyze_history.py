@@ -13,6 +13,10 @@ from pathlib import Path
 
 
 
+def variant_key(name: str):
+    return int(name[1:]) if name[1:].isdigit() else 0, name          # V2 before V10
+
+
 def mean(xs):
     xs = list(xs)
     return sum(xs) / len(xs) if xs else None
@@ -44,7 +48,7 @@ def teacher_tables(path, optional=("drop",)) -> dict:
         w["won"] += e["end"]["won"]
         if e["end"]["problem"]:
             w["problems"].append([e["game"], e["end"]["problem"]])
-    for (model, level, variant), g in sorted(groups.items()):
+    for (model, level, variant), g in sorted(groups.items(), key=lambda kv: (*kv[0][:2], variant_key(kv[0][2]))):
         out["overall"].append({"model": model, "level": level, "variant": variant, **stats(g)})
         # t = 0 has no history, so every variant sees the same prompt there; the later steps carry the difference
         out["after_t0"].append({"model": model, "level": level, "variant": variant,
@@ -81,7 +85,7 @@ def print_teacher(t: dict) -> None:
     for key, title, col in (("by_type", "by action type", "type"), ("by_step", "by step", "t")):
         print(f"\n## Teacher-forced: top-1 rate {title} (mean log q in brackets)\n")
         cells = defaultdict(dict)
-        VARIANTS = sorted({r["variant"] for r in t[key]})
+        VARIANTS = sorted({r["variant"] for r in t[key]}, key=variant_key)
         for r in t[key]:
             cells[r["model"], r["level"], r[col]][r["variant"]] = r
         print(f"| model | level | {col} | states | " + " | ".join(VARIANTS) + " |")

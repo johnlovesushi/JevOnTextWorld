@@ -6,7 +6,7 @@
 
 Every game is played along its walkthrough (the game's .json, metadata.walkthrough; the pure information
 commands that TextWorldEnv filters out are skipped). At every state on that path the prompt is built once per
-variant (V1-V5: history_mode x history_window, see VARIANTS; V6-V9: changes to the V2 prompt made in this
+variant (V1-V5: history_mode x history_window, see VARIANTS; V6-V14: changes to the V2 prompt made in this
 script, see SCRIPT_VARIANTS) and `LMPolicy.decision_forward` scores all options
 without reasoning and without the forecast. All variants see the same states, so differences come from the
 prompt alone. One JSON line per (model, level, game, step, variant).
@@ -34,7 +34,14 @@ VARIANTS = {"V1": ("full", 8), "V2": ("feedback", 8), "V3": ("full", 1), "V4": (
 # Variants built in this script, not by jevtw (asked for by the user after the first report): the V2 prompt
 # (feedback, window 8) with one or more changes. Keys: see `script_prompt`.
 SCRIPT_VARIANTS = {"V6": {"dedup": True}, "V7": {"inventory": True}, "V8": {"hint": True},
-                   "V9": {"dedup": True, "inventory": True, "hint": True}}
+                   "V9": {"dedup": True, "inventory": True, "hint": True},
+                   # second follow-up: parts of the full observation put back into every past step (R room
+                   # description, I inventory, N notes = the recipe). With V2 (nothing), V7 (I, in its own layout)
+                   # and V1 (R + I + N, which is history_mode "full") this is the 2 x 2 x 2 design.
+                   "V10": {"parts": ("notes",)}, "V11": {"parts": ("room",)},
+                   "V12": {"parts": ("inventory", "notes")}, "V13": {"parts": ("room", "notes")},
+                   "V14": {"parts": ("room", "inventory")}}
+PARTS = ("room", "inventory", "notes")
 ALL_VARIANTS = [*VARIANTS, *SCRIPT_VARIANTS]
 HINT = ("Ingredients in your inventory show their state (for example fried or sliced). "
         "Do not repeat a step that is already done.")
@@ -56,13 +63,42 @@ def inventory_line(text: str) -> str:
     return "Inventory:" + text.split("Inventory:", 1)[1].split("\n\n", 1)[0].rstrip()
 
 
-def script_prompt(objective, history, obs, cfg: PolicyConfig, dedup=False, inventory=False, hint=False) -> str:
+def split_observation(obs) -> dict:
+    """The pieces TextWorldEnv._observe joins into obs.text: "head" (what full history shows first: the feedback,
+    or the whole room description after a move), "room" (the room description; "" when the head already is
+    it), "inventory" and "notes" ("" before the cookbook was read). The pieces joined by blank lines are
+    obs.text again."""
+    rest, notes = obs.text, ""
+    if "\n\nNotes:\n" in rest:
+        rest, notes = rest.split("\n\nNotes:\n", 1)
+        notes = "Notes:\n" + notes
+    head, inventory = rest.rsplit("\n\nInventory: ", 1)
+    inventory = "Inventory: " + inventory
+    room = ""
+    if obs.feedback and head.startswith(obs.feedback + "\n\n"):
+        head, room = obs.feedback, head[len(obs.feedback) + 2:]
+    return {"head": head, "room": room, "inventory": inventory, "notes": notes}
+
+
+def step_text(after, parts) -> str:
+    """A past step under `parts`: its feedback, then the chosen pieces of its full observation. With a room
+    description that is the feedback itself (after a move) "room" shows that description, as full history does."""
+    pieces = split_observation(after)
+    first = pieces["head"] if "room" in parts else after.feedback
+    return "\n\n".join([first, *(pieces[k] for k in PARTS if k in parts and pieces[k])])
+
+
+def script_prompt(objective, history, obs, cfg: PolicyConfig, dedup=False, inventory=False, hint=False,
+                  parts=()) -> str:
     """The prompt of jevtw.policy.build_prompt for history_mode "feedback" without reasoning (with no flag set
     it is the same string; a test checks this), with these changes:
       dedup      the current observation does not start with the feedback of the last command again (that line
                  is already the end of "Recent steps")
       inventory  every past step also shows the inventory after it
-      hint       the sentence HINT follows the objective"""
+      hint       the sentence HINT follows the objective
+      parts      every past step also shows these pieces of its full observation (see `step_text`); all of
+                 PARTS gives the prompt of history_mode "full".
+    """
     lines = [f"Objective: {objective}", ""]
     if hint:
         lines += [HINT, ""]
@@ -70,7 +106,7 @@ def script_prompt(objective, history, obs, cfg: PolicyConfig, dedup=False, inven
     if recent:
         lines.append("Recent steps:")
         for cmd, after in recent:
-            lines += [f"> {cmd}", after.feedback]
+            lines += [f"> {cmd}", step_text(after, parts)]
             if inventory and inventory_line(after.text):
                 lines.append(inventory_line(after.text))
             lines.append("")
@@ -196,7 +232,7 @@ def main(argv=None):
     ap.add_argument("--show", help="a game file: print the prompts of --step instead of scoring")
     ap.add_argument("--step", type=int, default=0)
     ap.add_argument("--variants", nargs="+", default=list(VARIANTS), choices=ALL_VARIANTS,
-                    help="default V1-V5 (jevtw configurations); V6-V9 are the script variants of the V2 prompt")
+                    help="default V1-V5 (jevtw configurations); V6-V14 are the script variants of the V2 prompt")
     args = ap.parse_args(argv)
     if args.show:
         show(args.show, args.step, args.variants)
