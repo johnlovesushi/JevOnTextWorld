@@ -155,11 +155,19 @@ def collect_batch(policy: LMPolicy, jobs: Sequence[tuple[str, Callable[[], objec
     return episodes
 
 
+REASONING_ENDS = ("answer", "eos", "cap", "cap_in_think")       # disjoint; the fractions sum to 1
+
+
 def reasoning_end(d: Decision, eos_id: int) -> str | None:
     """How c_t ended: "eos", "answer" (it ends with "Answer:"), "cap" (max_reasoning_tokens reached, so the answer
-    prefix was forced), or None when there is no reasoning."""
+    prefix was forced), "cap_in_think" (the cap was reached inside the thinking block of prompt_format
+    "chat_think", so "</think>" was forced too), or None when there is no reasoning. Decisions made by
+    `LMPolicy.decide` carry the answer (`Decision.reasoning_end`, from `LMPolicy._finish`); for a hand-built
+    Decision it is inferred from the ids, which cannot tell "cap_in_think" from "cap"."""
     if not d.reasoning_ids:
         return None
+    if d.reasoning_end is not None:
+        return d.reasoning_end
     if d.reasoning_ids[-1] == eos_id:
         return "eos"
     # Nothing dropped and nothing appended to prompt + c_t: see LMPolicy._action_context.
@@ -177,6 +185,6 @@ def rollout_metrics(episodes: Sequence[Episode], stats: dict, wall_s: float, eos
            **{k: round(stats.get(k, 0.0), 3) for k in ("gen_s", "score_s", "env_s", "prompt_s")},
            "mean_reasoning_tokens": sum(len(d.reasoning_ids) for d in decisions) / n,
            "mean_options": sum(len(d.option_ids) for d in decisions) / n}
-    for kind in ("answer", "eos", "cap"):
+    for kind in REASONING_ENDS:
         out[f"reasoning_end_{kind}"] = (ends.count(kind) / len(ends)) if ends else None
     return out

@@ -2,7 +2,8 @@
 
 At step t the model sees a prompt built from h_t, samples reasoning tokens c_t (temperature 1, full vocabulary, so the
 sampling law is exactly pi_theta), then picks a_t from q_theta = softmax over the K_t candidate commands, where the
-logit l(a^j) of option j is the log-likelihood of the continuation " j<EOS>" after "Answer:". Afterwards it can read
+logit l(a^j) of option j is the log-likelihood of the continuation " j<EOS>" after "Answer:". The prompt is a text
+to continue or a chat turn (`PolicyConfig.prompt_format`); `LMPolicy._finish` says how c_t ends. Afterwards it can read
 the forecast logit s_t = l(yes) - l(no) after a confidence question that is never written into the history;
 p_t = sigmoid(s_t), or sigmoid(a s_t + b) with Platt scaling (`forecast_prob`).
 
@@ -36,7 +37,7 @@ class Decision:
     action: int                           # index of a_t among the options
     prompt_ids: list[int]
     reasoning_ids: list[int]              # c_t
-    action_context_ids: list[int]         # prompt + c_t (minus a final EOS) + forced "Answer:" when needed
+    action_context_ids: list[int]         # prompt + c_t (minus a final EOS) + the forced suffix when needed
     option_ids: list[list[int]]           # " j<EOS>" for every option j
     behavior_logps: list[float]           # log-probs at sampling time: |c_t| reasoning tokens, then log q(a_t)
     p: float | None = None                # forecast at sampling time (theta_old), used for b_i
@@ -44,6 +45,8 @@ class Decision:
     forecast_logit: float | None = None   # s_t = l(yes) - l(no) of the chosen option, before Platt scaling
     forecast_logits_options: list[float] | None = None    # s_j for every option j
     confidence_ids: list[int] | None = None
+    # How c_t ended: "answer", "eos", "cap", "cap_in_think" (LMPolicy._finish); None without reasoning.
+    reasoning_end: str | None = None
     old_logps: list[float] | None = field(default=None, repr=False)   # filled by the trainer
     ref_logps: list[float] | None = field(default=None, repr=False)
 
@@ -56,7 +59,8 @@ def build_prompt(objective: str, history: Sequence[tuple[str, Observation]], obs
                  cfg: PolicyConfig) -> str:
     """Text of h_t: the objective, the last `history_window` steps (the command and, depending on
     `history_mode`, the whole observation that followed or only the game's feedback), the current observation
-    and the numbered admissible commands."""
+    and the numbered admissible commands. With a chat `prompt_format` this text (with its own last instruction)
+    is the user turn of `chat_prompt`."""
     lines = [f"Objective: {objective}", ""]
     recent = list(history)[-cfg.history_window:] if cfg.history_window > 0 else []
     if recent:
@@ -66,12 +70,30 @@ def build_prompt(objective: str, history: Sequence[tuple[str, Observation]], obs
     lines += ["Current observation:", obs.text, "", "Options:"]
     lines += [f"{j + 1}. {c}" for j, c in enumerate(obs.commands)]
     lines.append("")
-    if cfg.max_reasoning_tokens > 0:
+    chat = cfg.prompt_format != "plain"
+    if cfg.max_reasoning_tokens <= 0:
+        lines.append("Reply with the number of one option.")
+    elif chat:
+        lines.append(f'First analyse the situation in at most three sentences, then write "{cfg.answer_prefix}" '
+                     "followed by the number of one option.")
+    else:
         lines += [f'Think step by step, then write "{cfg.answer_prefix}" followed by the number of one option.',
                   cfg.reasoning_prefix]
-    else:
-        lines.append("Reply with the number of one option.")
-    return "\n".join(lines)
+    text = "\n".join(lines)
+    return chat_prompt(text, think=cfg.prompt_format == "chat_think") if chat else text
+
+
+THINK_CLOSE = "</think>"
+
+
+def chat_prompt(content: str, think: bool) -> str:
+    """One user turn and the start of the assistant turn, written out by hand with Qwen3's markers so that CPU
+    tests can use the byte tokenizer (scripts/check_prompt_formats.py compares with the tokenizer's template).
+    think = False: the assistant turn starts with an empty thinking block, exactly the template with
+    enable_thinking=False. think = True: it starts with "<think>\n"; the template with enable_thinking=True stops
+    after "<|im_start|>assistant\n" and leaves "<think>\n" to the model, here it is part of the prompt."""
+    start = "<think>\n" if think else "<think>\n\n</think>\n\n"
+    return f"<|im_start|>user\n{content}<|im_end|>\n<|im_start|>assistant\n{start}"
 
 
 PLATT_FILE = "platt.json"
@@ -91,7 +113,9 @@ class LMPolicy:
         if self.eos_id is None:
             raise ValueError("the tokenizer needs an EOS token to delimit option numbers")
         self.pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else self.eos_id
+        # Forced suffixes (no likelihood terms) that make the action context end with "Answer:".
         self.answer_ids = self.encode("\n" + cfg.answer_prefix)
+        self.think_answer_ids = self.encode(f"\n{THINK_CLOSE}\n\n{cfg.answer_prefix}")   # closes an open thinking block
         self.confidence_prompt_ids = self.encode(cfg.confidence_prompt)
         # What follows the option before the forecast is read, and the two tokens that are read.
         if cfg.forecast_format == "chat":
@@ -188,7 +212,8 @@ class LMPolicy:
         context = self._action_context(prompt_ids, reasoning)
         options = [self.encode(f" {j + 1}") + [self.eos_id] for j in range(len(obs.commands))]
         decision = Decision(command="", action=-1, prompt_ids=prompt_ids, reasoning_ids=reasoning,
-                            action_context_ids=context, option_ids=options, behavior_logps=[])
+                            action_context_ids=context, option_ids=options, behavior_logps=[],
+                            reasoning_end=self._finish(reasoning)[2])
         _, scores, s = self.decision_forward(self.model, decision, forecast=cfg.forecast)
         log_q = torch.log_softmax(scores, dim=0)
         action = int(torch.multinomial(log_q.exp().to(generator.device), 1, generator=generator))
@@ -246,7 +271,7 @@ class LMPolicy:
             tok = int(torch.multinomial(logprobs.exp().to(generator.device), 1, generator=generator))
             tokens.append(tok)
             logps.append(float(logprobs[tok]))
-            if tok == self.eos_id or self._ends_with_answer(tokens):
+            if tok == self.eos_id or self._answer_reached(tokens):
                 break
             hidden, cache = self._backbone(self.model, self._tensor([tok]), cache)
         return tokens, logps
@@ -260,7 +285,7 @@ class LMPolicy:
           * prompts are LEFT-padded, so the last column is the last prompt token of every row; pads are masked out
             and position_ids = cumsum(mask) - 1 gives every real token the position it has in the unpadded prompt;
           * rows of a batch never attend to each other, so a row's logits depend on nothing but its own tokens;
-          * each row stops on its own (EOS, ends with "Answer:", or the cap). A stopped row keeps being fed a pad
+          * each row stops on its own (EOS, `_answer_reached`, or the cap). A stopped row keeps being fed a pad
             token with attention mask 0 so that the batch stays rectangular; its outputs are discarded.
         KV cache: rows x (longest prompt + generated tokens) x layers x 2 x kv_heads x head_dim values."""
         b = len(prompts)
@@ -289,7 +314,7 @@ class LMPolicy:
             for i, tok, lp in zip(alive, drawn.tolist(), drawn_lp.tolist()):
                 tokens[i].append(tok)
                 logps[i].append(lp)
-                if not (tok == self.eos_id or self._ends_with_answer(tokens[i])):
+                if not (tok == self.eos_id or self._answer_reached(tokens[i])):
                     still.append(i)
             alive = still
             if not alive or step == cap - 1:
@@ -309,11 +334,42 @@ class LMPolicy:
         tail = self.tokenizer.decode(tokens[-16:])
         return tail.rstrip().endswith(self.cfg.answer_prefix)
 
+    def _think_open(self, tokens: list[int]) -> bool:
+        """prompt_format "chat_think" only: the thinking block opened by the prompt is not closed in `tokens`."""
+        return self.cfg.prompt_format == "chat_think" and THINK_CLOSE not in self.tokenizer.decode(tokens)
+
+    def _answer_reached(self, tokens: list[int]) -> bool:
+        """The stop condition of sampling besides EOS and the cap: c_t ends with "Answer:", and with "chat_think"
+        that "Answer:" stands after "</think>" (one written inside the thinking block does not stop c_t)."""
+        return self._ends_with_answer(tokens) and not self._think_open(tokens)
+
+    def _finish(self, reasoning: list[int]) -> tuple[list[int], list[int], str | None]:
+        """How c_t ended and what follows it in the action context: (body, forced suffix, kind). The action context
+        is prompt + body + suffix and always ends with "Answer:".
+
+          kind            c_t                                              body      suffix
+          "answer"        ends with "Answer:" (`_answer_reached`)          c         nothing
+          "eos"           ends with a sampled EOS                          c[:-1]    forced, see below
+          "cap"           max_reasoning_tokens reached, no open thinking   c         "\nAnswer:"
+          "cap_in_think"  cap reached inside the thinking block            c         "\n</think>\n\nAnswer:"
+          None            no reasoning (max_reasoning_tokens = 0)          empty     forced, see below
+
+        The forced suffix is "\n</think>\n\nAnswer:" when the body leaves the thinking block of "chat_think" open
+        and "\nAnswer:" otherwise (always, in the other two formats). Since the suffix is never empty unless
+        body = c, len(prompt) + |c| <= len(context) holds in every case, and context[:P + |c| - 1] is the prompt
+        followed by c[:-1]: the invariant `decision_forward` needs to score the reasoning tokens."""
+        eos = bool(reasoning) and reasoning[-1] == self.eos_id
+        body = reasoning[:-1] if eos else reasoning
+        if body and not eos and self._answer_reached(body):
+            return body, [], "answer"
+        think_open = self._think_open(body)
+        suffix = self.think_answer_ids if think_open else self.answer_ids
+        kind = None if not reasoning else "eos" if eos else "cap_in_think" if think_open else "cap"
+        return body, suffix, kind
+
     def _action_context(self, prompt_ids: list[int], reasoning: list[int]) -> list[int]:
-        body = reasoning[:-1] if reasoning and reasoning[-1] == self.eos_id else reasoning
-        if body and body is reasoning and self._ends_with_answer(body):
-            return prompt_ids + body
-        return prompt_ids + body + self.answer_ids
+        body, suffix, _ = self._finish(reasoning)
+        return prompt_ids + body + suffix
 
     # ---------------------------------------------------------------- scoring (differentiable)
 
@@ -342,9 +398,9 @@ class LMPolicy:
         x, c, options = d.action_context_ids, d.reasoning_ids, d.option_ids
         n, n_prompt, k = len(x), len(d.prompt_ids), len(options)
         # The reasoning tokens are predicted at positions P-1 .. P+|c|-2, which must lie inside the prefix x[0:n-1],
-        # i.e. P + |c| <= n. All three ways the reasoning can end satisfy it: ending with "Answer:" gives
-        # n = P + |c|; a sampled EOS gives n = P + |c| - 1 + |answer|; hitting the token cap gives
-        # n = P + |c| + |answer|. In each case x[0:P+|c|-1] is the prompt followed by c[:-1].
+        # i.e. P + |c| <= n. Every way the reasoning can end satisfies it (`_finish`): ending with "Answer:" gives
+        # n = P + |c|; a sampled EOS gives n = P + |c| - 1 + |suffix|; hitting the token cap gives
+        # n = P + |c| + |suffix|, with |suffix| >= 1. In each case x[0:P+|c|-1] is the prompt followed by c[:-1].
         assert n >= 2 and n_prompt >= 1 and n_prompt + len(c) <= n, (n_prompt, len(c), n)
         assert x[:n_prompt + max(len(c) - 1, 0)] == d.prompt_ids + c[:max(len(c) - 1, 0)]
 
