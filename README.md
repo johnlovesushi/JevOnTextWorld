@@ -36,6 +36,7 @@ configs/         grpo.json（λ=α=0）、grpo_calibrated.json（λ=0.3, α=0.1�
 scripts/         make_games.py：用 tw-make 生成 cooking 游戏
                  summarize_run.py：把一次运行整理成固定格式的报告
                  prompt_tokens.py：按通关路线统计两种 history_mode 下提示词的 token 数（CPU）
+                 check_prompt_formats.py：核对对话格式提示词和官方模板（CPU）；加 --sample 用模型采样若干决策（GPU）
 reports/         实验报告 <ID>.md / <ID>.json
 tests/           CPU 单元测试
 CLAUDE.md        给服务器端 agent 的工作说明
@@ -68,6 +69,6 @@ python -m jevtw.train --config configs/grpo_calibrated.json --model Qwen/Qwen3-1
 评测行还有预测 logit $s$ 的诊断：`forecast_auc`、`forecast_auc_t0`、`forecast_s_mean_win`、`forecast_s_mean_lose`；
 加 `--save-forecasts` 会把每次评测中每一步的 $s$、$p$ 写到 `runs/<name>/forecasts/batchNNNN.jsonl`。
 只评测一个 checkpoint：`python -m jevtw.train --model runs/<name>/checkpoints/batchNNNN --val-games … --batches 0 --save-forecasts --out runs/<新目录>`。
-预测的读法（`forecast_format`）、交叉熵校准损失（`cal_loss`）和 Platt 缩放（`platt`）见 `docs/implementation.md`。
+提示词格式（`prompt_format`：`plain` / `chat_nothink` / `chat_think`）、预测的读法（`forecast_format`）、交叉熵校准损失（`cal_loss`）和 Platt 缩放（`platt`）见 `docs/implementation.md`。
 
 > 当前状态：CPU 测试和冒烟测试都通过了；还没有在 GPU 上用真实模型训练过。

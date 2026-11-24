@@ -180,6 +180,39 @@ $\mathrm{KL}(\pi_{\theta_\text{old}}\Vert\pi_\theta)$；第一遍严格为 0。�
 两种模式下 $h_t$ 包含的信息在窗口内基本相同（`"feedback"` 少了窗口内更早房间的描述），所以这也是对 $h_t$ 的截断近似。
 参考配置 `configs/grpo_feedback.json` 和 `grpo.json` 只差这一项。
 
+**提示词格式和推理的结束方式（`PolicyConfig.prompt_format`，T0006）。** 默认 `"plain"` 是续写式：提示词以
+`Think step by step, then write "Answer:" …` 和一行 `Reasoning:` 结尾。两种对话格式把同样的内容放进 Qwen3
+对话模板的 user 消息（`policy.chat_prompt`，手写字符串），最后的说明换成
+`First analyse the situation in at most three sentences, then write "Answer:" followed by the number of one option.`，
+没有 `Reasoning:` 一行：
+
+| `prompt_format` | assistant 一侧的开头（属于提示词，没有似然项） | $c_t$ |
+|---|---|---|
+| `"chat_nothink"` | `<\|im_start\|>assistant\n<think>\n\n</think>\n\n` | assistant 写出的文字 |
+| `"chat_think"` | `<\|im_start\|>assistant\n<think>\n` | 思考块的内容、`</think>` 和它后面的文字 |
+
+`chat_nothink` 的字符串和 `tokenizer.apply_chat_template(..., enable_thinking=False)` 逐字相同。
+`enable_thinking=True` 时官方模板停在 `<|im_start|>assistant\n`，由模型自己写出 `<think>\n`；这里按 T0006 的规定把
+`<think>\n` 放进提示词，所以 `chat_think` = 官方模板 + `<think>\n`（`scripts/check_prompt_formats.py` 核对这两点）。
+`max_reasoning_tokens = 0` 时 user 消息以 `Reply with the number of one option.` 结尾，和 `plain` 相同。
+
+采样 $c_t$ 在三种情况下停止：采样到 EOS（Qwen3 的 EOS 是 `<|im_end|>`）、$c_t$ 以 `Answer:` 结尾、达到
+`max_reasoning_tokens`。`chat_think` 下 `Answer:` 必须出现在 `</think>` 之后才算数，思考块里面写的 `Answer:` 不会停止。
+动作上下文 $x$ = 提示词 $\oplus$ body $\oplus$ 后缀，总是以 `Answer:` 结尾；这些都由 `LMPolicy._finish` 一个函数决定：
+
+| 结束方式（`Decision.reasoning_end`） | body | 强制补上的后缀（没有似然项） |
+|---|---|---|
+| `"answer"`：以 `Answer:` 结尾 | $c_t$ | 无 |
+| `"eos"`：采样到 EOS | $c_t$ 去掉 EOS | 思考块未闭合时 `\n</think>\n\nAnswer:`，否则 `\nAnswer:` |
+| `"cap"`：达到上限，思考块已闭合（或格式没有思考块） | $c_t$ | `\nAnswer:` |
+| `"cap_in_think"`：达到上限时思考块未闭合（只有 `chat_think`） | $c_t$ | `\n</think>\n\nAnswer:` |
+| 没有推理（`max_reasoning_tokens = 0`） | 空 | 同 `"eos"` 一行的规则 |
+
+“思考块未闭合”指 `chat_think` 下 body 解码后的文本里没有 `</think>`。记 $P$ 为提示词长度、$n=\lvert x\rvert$：`"answer"` 时
+$n=P+\lvert c\rvert$，其余情况后缀非空，所以 $P+\lvert c\rvert\le n$ 总成立，并且 $x_{0:P+\lvert c\rvert-1}$ 等于提示词加上 $c$ 去掉最后一个
+token。这正是 `decision_forward` 在前缀里给推理 token 打分所需要的不变式（T0001），所以打分代码不用改。
+对话格式配上不是 `"chat"` 的 `forecast_format` 时，`Config` 会给出警告（确认问题会以纯文本接在 assistant 的回答后面）。
+
 **TextWorld 观测。** 默认去掉 look / inventory / examine X（cookbook 除外）这些纯信息命令，
 因为观测里已经显示了房间和背包。默认也删除 “Your score has just gone up” 这类提示，
 让 $z$ 成为唯一的成功信号。两者都可以在 `TextWorldEnv` 中关闭。TextWorld 的游戏是确定性的，
@@ -211,7 +244,7 @@ $\mathrm{KL}(\pi_{\theta_\text{old}}\Vert\pi_\theta)$；第一遍严格为 0。�
 
 - prompt **左侧补齐**，补齐位置被 `attention_mask` 屏蔽，`position_ids = cumsum(mask) - 1`，
   所以每个真实 token 的上下文和位置与不补齐时相同；batch 内各行之间本来就互不可见。
-- 每行各自判断停止（EOS、以 `Answer:` 结尾、达到 `max_reasoning_tokens`）。已停止的行继续喂 pad，
+- 每行各自判断停止（EOS、`LMPolicy._answer_reached`、达到 `max_reasoning_tokens`）。已停止的行继续喂 pad，
   但 mask 为 0，输出被丢弃。
 - 每条轨迹有自己的环境实例和自己的 `torch.Generator`（建在模型所在设备上，种子是 `sample_seed`），
   逐行 `torch.multinomial`，温度 1，全词表。所以一条轨迹采到什么，不取决于旁边跑的是哪些轨迹
@@ -228,9 +261,10 @@ $\mathrm{KL}(\pi_{\theta_\text{old}}\Vert\pi_\theta)$；第一遍严格为 0。�
 
 **采样指标。** 训练行和评测行都记录：`gen_s` / `score_s` / `env_s` / `prompt_s`（生成推理、打分、
 环境、构造 prompt 各自的秒数；`env_s` 包含创建和重置环境）、`sec_per_decision`（采样墙钟时间 ÷ 决策数，
-不含参数更新）、`mean_reasoning_tokens`、`reasoning_end_answer` / `reasoning_end_eos` / `reasoning_end_cap`
-（推理以 `Answer:` 结束、以 EOS 结束、达到上限被截断的比例）和 `mean_options`（$\bar K$）。
-截断比例超过 0.5 时 `scripts/summarize_run.py` 会报警。
+不含参数更新）、`mean_reasoning_tokens`、`reasoning_end_answer` / `reasoning_end_eos` / `reasoning_end_cap` /
+`reasoning_end_cap_in_think`（推理以 `Answer:` 结束、以 EOS 结束、达到上限被截断、在思考块里被截断的比例，
+四项互不重叠，和为 1）和 `mean_options`（$\bar K$）。
+截断比例（后两项之和）超过 0.5 时 `scripts/summarize_run.py` 会报警。
 
 ## 4. 测试
 
@@ -244,5 +278,6 @@ $\mathrm{KL}(\pi_{\theta_\text{old}}\Vert\pi_\theta)$；第一遍严格为 0。�
 | `tests/test_batched_rollout.py` | 批量生成推理（prompt 长度各不相同、三种结束方式都出现）记录的概率等于 `score()`；同一行单独采样和放在 batch 里采样结果相同；`parallel=1` 的 `collect_batch` 与 `run_episode` 完全相同；同样的种子可复现；任务多于并行数时输出顺序和内容正确、同时打开的环境不超过并行数、出错时环境被关闭；无推理模式；TextWorld |
 | `tests/test_t0003.py` | bf16 小模型上 `_logprobs` 逐位等于 FP32 输出层的结果，梯度能流回 bf16 权重；不带推理时重算的 old 逐位等于采样时的概率，old / ref / 训练三处的 `forecast` 都等于 `policy.cfg.forecast`；$\alpha=0$ 时 $p$ 不进损失；TIS 关闭时损失不变、开启时等于手算值、权重不带梯度且不影响 KL 和校准项；warmup 每个 batch 的学习率、同一 batch 各遍相同、不开时不碰优化器；`kl_old` 第一遍为 0、更新后大于 0 |
 | `tests/test_t0004.py` | `history_mode="full"` 的提示词和改动前逐字相同（KeyChest 固定轨迹的快照、TextWorld 上按旧格式重建）；`"feedback"` 模式下房间描述、背包、notes 各出现一次；移动的反馈只保留房间标题；两种模式下 `collect_batch(parallel=1)` 等于 `run_episode`；不传 `--wandb-project` 时不 import wandb，传了之后 `init` / `log` / `finish` 的参数（step、`val/` 前缀、`pass1/`、`pass_last/`），online 初始化失败时改用 offline 并继续训练 |
+| `tests/test_t0006.py` | `plain` 的提示词和改动前逐字相同；两种对话格式的提示词快照；每种格式、每种结束方式（`Answer:`、EOS、思考块内外截断、没有推理，共 17 种情形）下的结束类型、后缀和不变式，`decision_forward` 等于朴素参考（1e-4），梯度一致；采样（逐条和 batch）时记录的概率等于打分时的概率，四种结束方式都由采样走到；`collect_batch(parallel=1)` 等于 `run_episode`；`reasoning_end_cap_in_think` 指标；`Config` 的警告 |
 | `tests/test_t0005.py` | 默认配置下 $\ell_j$、$p$、两遍的损失和更新后的参数与改动前的快照逐位相同；三种 `forecast_format` 的序列构造、$\ell_j$ 一致（1e-5）、$s$ 和梯度等于“每个选项一条完整序列”的朴素参考（1e-4）；BCE 的数值和对 logit 的梯度 $p-z$，Brier 的梯度在 $p\to1$ 时消失；`platt_only` 下语言模型的更新与没有校准项时逐位相同；Platt 的数据初始化公式和截断、参数组学习率、预热不作用于 Platt 组、`platt.json` 存取；AUC 等于两两比较的暴力计数；`forecast_brier_const` 按决策加权；forecasts 记录的字段；端到端：`--smoke` 训练并保存 checkpoint，再用 `--model <目录> --batches 0 --save-forecasts` 评测 |
 | `tests/test_policy_trainer.py` | 提示词的历史窗口；KV cache 采样的概率等于打分的概率；共享前缀打分与朴素参考实现的数值、梯度一致（推理的四种结束方式，一位数和两位数选项）；嵌入层和输出层处理的 token 数等于“一次前缀 + 各选项后缀”；动作分布等于对选项的 softmax，`p_options` 等于逐选项读出的 $p_j$；无推理模式；同一组共享初始状态且可复现；第一遍的损失等于公式值（两种归一化）；参数确实被更新；$\lambda=\alpha=\beta=0$ 且全组结果相同时不更新；KL 的检查 |

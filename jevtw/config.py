@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field, fields
+import warnings
 from pathlib import Path
 
 NORMALIZATIONS = ("token", "episode")
 HISTORY_MODES = ("full", "feedback")
 FORECAST_FORMATS = ("after_eos", "no_eos", "chat")
+PROMPT_FORMATS = ("plain", "chat_nothink", "chat_think")
 CAL_LOSSES = ("brier", "bce")
 CAL_GRADS = ("full", "platt_only")
 
@@ -19,6 +21,13 @@ class PolicyConfig:
     max_reasoning_tokens: int = 320      # |c_t| cap; 0 = choose directly after the prompt
     reasoning_prefix: str = "Reasoning:"
     answer_prefix: str = "Answer:"        # sampling c_t stops once the reasoning ends with this, or at EOS
+    # How the prompt is laid out and where the reasoning c_t is written (T0006):
+    #   "plain"         a text to continue; with reasoning it ends with the line `reasoning_prefix`;
+    #   "chat_nothink"  one user turn in Qwen's chat template and an assistant turn that starts with an empty
+    #                   thinking block ("<think>\n\n</think>\n\n"); c_t is what the assistant writes;
+    #   "chat_think"    the same user turn, the assistant turn starts with "<think>\n"; c_t includes the thinking
+    #                   block, and "Answer:" ends c_t only after "</think>".
+    prompt_format: str = "plain"
     history_window: int = 8               # past (command, observation) pairs shown; h_t is truncated to this
     # What a past step shows after its command: "full" = the whole observation that followed (room, inventory and
     # notes again at every step), "feedback" = only what the game answered (Observation.feedback). The current
@@ -49,6 +58,8 @@ class PolicyConfig:
     def __post_init__(self):
         if self.history_mode not in HISTORY_MODES:
             raise ValueError(f"history_mode must be one of {HISTORY_MODES}, got {self.history_mode!r}")
+        if self.prompt_format not in PROMPT_FORMATS:
+            raise ValueError(f"prompt_format must be one of {PROMPT_FORMATS}, got {self.prompt_format!r}")
         if self.forecast_format not in FORECAST_FORMATS:
             raise ValueError(f"forecast_format must be one of {FORECAST_FORMATS}, got {self.forecast_format!r}")
 
@@ -114,6 +125,13 @@ class GRPOConfig:
 class Config:
     policy: PolicyConfig = field(default_factory=PolicyConfig)
     grpo: GRPOConfig = field(default_factory=GRPOConfig)
+
+    def __post_init__(self):
+        if self.policy.prompt_format != "plain" and self.policy.forecast_format != "chat":
+            warnings.warn(f"prompt_format = {self.policy.prompt_format!r} is a chat format but forecast_format = "
+                          f"{self.policy.forecast_format!r}: the confidence question is appended as plain text "
+                          'inside the assistant turn (forecast_format = "chat" asks it in a new user turn)',
+                          stacklevel=2)
 
     @classmethod
     def from_dict(cls, data: dict) -> "Config":

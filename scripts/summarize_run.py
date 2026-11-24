@@ -23,9 +23,11 @@ WINDOW = 10                               # batches averaged at the start and en
 TRAIN_KEYS = ("win_rate", "mean_return", "mean_bonus", "mixed_groups", "active_groups", "mean_length",
               "mean_forecast", "mean_forecast_logit", "cal_loss", "platt_a", "platt_b", "decisions", "reasoning_tokens", "rollout_s", "update_s",
               "gen_s", "score_s", "env_s", "prompt_s", "mean_reasoning_tokens", "reasoning_end_answer",
-              "reasoning_end_eos", "reasoning_end_cap", "mean_options", "behavior_old_mean_abs_diff", "lr")
+              "reasoning_end_eos", "reasoning_end_cap", "reasoning_end_cap_in_think", "mean_options",
+              "behavior_old_mean_abs_diff", "lr")
 SAMPLING_KEYS = ("sec_per_decision", "gen_s", "score_s", "env_s", "prompt_s", "mean_reasoning_tokens",
-                 "reasoning_end_answer", "reasoning_end_eos", "reasoning_end_cap", "mean_options")
+                 "reasoning_end_answer", "reasoning_end_eos", "reasoning_end_cap", "reasoning_end_cap_in_think",
+                 "mean_options")
 PASS_KEYS = ("loss", "grad_norm", "clip_frac", "kl", "cal_loss", "kl_old", "tis_mean_w", "tis_capped_frac")
 FORECAST_KEYS = ("forecast_auc", "forecast_auc_t0", "forecast_s_mean_win", "forecast_s_mean_lose",
                  "mean_forecast_logit")
@@ -114,12 +116,17 @@ def summarize(run_dir: Path, run_id: str, title: str) -> dict:
     if kl_old is not None and kl_old > KL_OLD_WARN:
         anomalies.append(f"mean last-pass kl_old {kl_old:.3g} > {KL_OLD_WARN} (each batch moves the policy far from "
                          "the one that sampled it)")
-    cap = mean([r.get("reasoning_end_cap") for r in train])
+    def capped(r):                        # truncated reasonings, inside or outside a thinking block
+        if r.get("reasoning_end_cap") is None:
+            return None
+        return r["reasoning_end_cap"] + (r.get("reasoning_end_cap_in_think") or 0)
+
+    cap = mean([capped(r) for r in train])
     if cap is not None and cap > CAP_WARN:
         anomalies.append(f"training: {cap:.2f} of the reasonings hit max_reasoning_tokens (> {CAP_WARN})")
     for r in val:
-        if (r.get("reasoning_end_cap") or 0) > CAP_WARN:
-            anomalies.append(f"validation at batch {r['batch']}: {r['reasoning_end_cap']:.2f} of the reasonings hit "
+        if (capped(r) or 0) > CAP_WARN:
+            anomalies.append(f"validation at batch {r['batch']}: {capped(r):.2f} of the reasonings hit "
                              f"max_reasoning_tokens (> {CAP_WARN})")
     if not val:
         anomalies.append("no validation evaluation recorded")
