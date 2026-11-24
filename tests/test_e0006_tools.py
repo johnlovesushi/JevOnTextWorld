@@ -137,3 +137,46 @@ def test_analysis_tables(tmp_path):
     assert dict(b["after_first_take"]["commands"]) == {"prepare meal": 1, "cook onion with stove": 1, "drop knife": 1}
     assert ah.item_of("put red onion on stove") == ("release", "red onion")
     assert ah.item_of("take red onion from fridge") == ("take", "red onion") and ah.item_of("eat meal") is None
+
+
+def test_script_variants_change_only_what_they_say(game):
+    import diagnose_history as dh
+
+    states = [s for s in dh.walk(game) if not isinstance(s, dict)]
+    cfg = dh.variant_config("V2")
+    for t, objective, history, obs, a_star in states:
+        base = build_prompt(objective, history, obs, cfg)
+        assert dh.script_prompt(objective, history, obs, cfg) == base          # no flag: the jevtw prompt
+        prompts = {n: dh.variant_prompt(n, objective, history, obs, dh.variant_config(n)) for n in dh.ALL_VARIANTS}
+        assert prompts["V2"] == base and prompts["V8"] == base.replace("\n\n", f"\n\n{dh.HINT}\n\n", 1)
+        options = base[base.index("\nOptions:"):]
+        assert all(p.endswith(options) for p in prompts.values())
+        if t == 0:                                                            # no history: nothing to change
+            assert prompts["V6"] == prompts["V7"] == base
+            continue
+        last = history[-1][1]
+        assert last.feedback and base.count(last.feedback) >= 2
+        assert prompts["V6"].count(last.feedback) == base.count(last.feedback) - 1
+        assert f"Current observation:\n{last.feedback}" in base
+        assert f"Current observation:\n{last.feedback}" not in prompts["V6"]
+        assert len(prompts["V6"]) == len(base) - len(last.feedback) - 2       # the line and the blank line after it
+        # V7: one inventory line per past step, the same one the full observation of that step showed
+        added = [line for line in prompts["V7"].splitlines() if line.startswith("Inventory:")]
+        assert len(added) == min(t, 8) + 1 and added[-2] == dh.inventory_line(last.text) == added[-1]
+        assert prompts["V7"].replace(dh.inventory_line(last.text) + "\n\nCurrent", "\nCurrent", 1) != prompts["V7"]
+        assert dh.HINT in prompts["V9"] and f"Current observation:\n{last.feedback}" not in prompts["V9"]
+    assert dh.inventory_line("a\n\nInventory: You are carrying:\n  a knife\n\nNotes:\nx") == \
+        "Inventory: You are carrying:\n  a knife"
+    assert dh.inventory_line("no such line") == ""
+
+
+def test_script_variants_are_scored(game):
+    import diagnose_history as dh
+
+    out = io.StringIO()
+    dh.run(tiny_model(seed=0), ByteTokenizer(), "tiny", {"L": game.parent}, out, None, ("V2", "V6", "V9"),
+           yes_text="Y", no_text="N")
+    rows = [json.loads(line) for line in out.getvalue().splitlines() if "end" not in json.loads(line)]
+    assert {r["variant"] for r in rows} == {"V2", "V6", "V9"} and {r["history_mode"] for r in rows} == {"feedback"}
+    by = {(r["t"], r["variant"]): r for r in rows}
+    assert by[1, "V6"]["prompt_tokens"] < by[1, "V2"]["prompt_tokens"] < by[1, "V9"]["prompt_tokens"]

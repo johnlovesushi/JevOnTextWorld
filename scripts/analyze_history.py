@@ -11,7 +11,6 @@ import json
 from collections import Counter, defaultdict
 from pathlib import Path
 
-VARIANTS = ["V1", "V2", "V3", "V4", "V5"]
 
 
 def mean(xs):
@@ -81,13 +80,14 @@ def print_teacher(t: dict) -> None:
                   f'{f(r["top1"])} | {f(r["mean_rank"], 2)} | {f(r["mean_K"], 1)} | {f(r["mean_prompt_tokens"], 0)} |')
     for key, title, col in (("by_type", "by action type", "type"), ("by_step", "by step", "t")):
         print(f"\n## Teacher-forced: top-1 rate {title} (mean log q in brackets)\n")
-        print(f"| model | level | {col} | states | " + " | ".join(VARIANTS) + " |")
-        print("|---|---|---|---|" + "---|" * len(VARIANTS))
         cells = defaultdict(dict)
+        VARIANTS = sorted({r["variant"] for r in t[key]})
         for r in t[key]:
             cells[r["model"], r["level"], r[col]][r["variant"]] = r
+        print(f"| model | level | {col} | states | " + " | ".join(VARIANTS) + " |")
+        print("|---|---|---|---|" + "---|" * len(VARIANTS))
         for (model, level, k), c in cells.items():
-            print(f"| `{model}` | {level} | {k} | {c['V1']['n']} | "
+            print(f"| `{model}` | {level} | {k} | {c[VARIANTS[0]]['n']} | "
                   + " | ".join(f'{f(c[v]["top1"], 2)} ({f(c[v]["mean_logq"], 2)})' for v in VARIANTS) + " |")
     print(f'\nstates with V1 rank 1 and V2 rank > 1: {len(t["v1_hit_v2_miss"])}; by (model, level, a* type): '
           f'{dict(Counter((r["model"], r["level"], r["a_star"].split()[0]) for r in t["v1_hit_v2_miss"]))}')
