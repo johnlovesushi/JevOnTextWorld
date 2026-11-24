@@ -19,6 +19,9 @@ class Observation:
     commands: list[str]                   # admissible commands A_g(s_t), shown to the agent as numbered options
     done: bool = False
     won: bool = False
+    # What the game answered to the last command, without the room description, the inventory and the notes
+    # ("" for the initial observation). PolicyConfig.history_mode = "feedback" shows this for past steps.
+    feedback: str = ""
 
 
 @dataclass
@@ -32,7 +35,7 @@ class KeyChestEnv:
     def reset(self, seed: int) -> Observation:
         self._state = {"key_in": random.Random(seed).choice(["drawer", "box"]), "open": set(), "has_key": False,
                        "done": False, "won": False}
-        return self._observe("You are in a small room with a drawer, a box and a locked chest.")
+        return self._observe("You are in a small room with a drawer, a box and a locked chest.", initial=True)
 
     def step(self, command: str) -> Observation:
         s = self._state
@@ -68,12 +71,12 @@ class KeyChestEnv:
             cmds.append("take key")
         return cmds + ["open chest", "smash chest", "wait"]
 
-    def _observe(self, text: str) -> Observation:
+    def _observe(self, text: str, initial: bool = False) -> Observation:
         s = self._state
         inventory = "the key" if s["has_key"] else "nothing"
         commands = [] if s["done"] else self._commands()
         return Observation(text=f"{text}\nYou are carrying: {inventory}.", commands=commands, done=s["done"],
-                           won=s["won"])
+                           won=s["won"], feedback="" if initial else text)
 
 
 def _clean_feedback(feedback: str) -> str:
@@ -109,7 +112,7 @@ class TextWorldEnv:
         gs = self._env.reset()
         self.objective = gs["objective"]
         self._notes = ""
-        return self._observe(gs, done=False)
+        return self._observe(gs, done=False, initial=True)
 
     def step(self, command: str) -> Observation:
         gs, _, done = self._env.step(command)
@@ -123,16 +126,20 @@ class TextWorldEnv:
             return True
         return not (cmd in _INFO_ONLY or (cmd.startswith("examine ") and cmd != "examine cookbook"))
 
-    def _observe(self, gs, done: bool) -> Observation:
+    def _observe(self, gs, done: bool, initial: bool = False) -> Observation:
         text = _clean_feedback(gs.feedback)
         if self.strip_score_text:
             text = _SCORE.sub("\n", text).strip()
         if "Recipe #" in text:
             self._notes, text = text, "You read the recipe (see notes)."
-        if "-=" not in text:                    # the feedback is not a room description: add the room
+        feedback = text
+        if "-=" in text:                        # a room description (after moving): its title line is the feedback
+            feedback = next(line.strip() for line in text.splitlines() if "-=" in line)
+        else:                                   # the feedback is not a room description: add the room
             text = f"{text}\n\n{_clean_feedback(gs['description'])}".strip()
         parts = [text, f"Inventory: {gs['inventory'].strip()}"]
         if self._notes:
             parts.append(f"Notes:\n{self._notes}")
         commands = [] if done else [c for c in gs["admissible_commands"] if self._keep(c)]
-        return Observation(text="\n\n".join(parts), commands=commands, done=done, won=bool(gs["won"]))
+        return Observation(text="\n\n".join(parts), commands=commands, done=done, won=bool(gs["won"]),
+                           feedback="" if initial else feedback)

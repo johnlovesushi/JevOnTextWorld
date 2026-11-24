@@ -6,7 +6,8 @@
   # CPU smoke run: tiny random model, byte tokenizer, KeyChest POMDP
   python -m jevtw.train --smoke --out runs/smoke
 
-Outputs in --out: config.json, metrics.jsonl (one line per batch / evaluation), checkpoints/batchNNNN/."""
+Outputs in --out: config.json, metrics.jsonl (one line per batch / evaluation), checkpoints/batchNNNN/.
+With --wandb-project the same lines also go to Weights & Biases (optional; wandb is only imported then)."""
 from __future__ import annotations
 
 import argparse
@@ -27,6 +28,7 @@ from .rollout import collect_batch, rollout_metrics
 from .trainer import Trainer
 
 GAME_SUFFIXES = (".z8", ".ulx")
+WANDB_INIT_TIMEOUT = 60                   # seconds an online wandb.init may take before falling back to offline
 
 
 def textworld_games(directory: str) -> list[tuple[str, object, int]]:
@@ -79,6 +81,34 @@ def evaluate(policy: LMPolicy, games, seeds, max_actions: int, parallel: int = 1
             **sampling}
 
 
+def wandb_record(record: dict) -> dict:
+    """One metrics.jsonl line as a flat W&B row. Evaluation lines get the prefix "val/"; the per-pass list of a
+    training line becomes pass1/<key> (first pass) and pass_last/<key>. The step is record["batch"]."""
+    if record.get("split") == "val":
+        return {f"val/{k}": v for k, v in record.items() if k not in ("batch", "split")}
+    row = {k: v for k, v in record.items() if k not in ("batch", "split", "passes")}
+    passes = record.get("passes") or []
+    if passes:
+        row.update({f"pass1/{k}": v for k, v in passes[0].items()})
+        row.update({f"pass_last/{k}": v for k, v in passes[-1].items()})
+    return row
+
+
+def start_wandb(project: str, name: str, mode: str, config: dict, directory: Path):
+    """wandb.init that cannot stop the training: when the online initialisation fails (no network, no login,
+    timeout), warn and continue with an offline run (`wandb sync` uploads it later)."""
+    import wandb  # optional dependency, imported only when --wandb-project is given
+
+    kwargs = dict(project=project, name=name, config=config, dir=str(directory))
+    if mode == "online":
+        try:
+            return wandb.init(mode="online", settings=wandb.Settings(init_timeout=WANDB_INIT_TIMEOUT), **kwargs)
+        except Exception as error:  # noqa: BLE001 - whatever went wrong, training goes on
+            print(f"WARNING: wandb online init failed ({type(error).__name__}: {error}); logging offline instead",
+                  flush=True)
+    return wandb.init(mode="offline", **kwargs)
+
+
 def load(args, cfg: Config):
     if args.smoke:
         from .testing import ByteTokenizer, tiny_model
@@ -110,6 +140,10 @@ def main(argv=None):
     ap.add_argument("--seed", type=int, default=17)
     ap.add_argument("--no-save", action="store_true", help="do not write checkpoints")
     ap.add_argument("--smoke", action="store_true", help="tiny random model on KeyChest, CPU")
+    ap.add_argument("--wandb-project", help="also log to this Weights & Biases project (off when not given)")
+    ap.add_argument("--wandb-run-name", help="default: the name of the --out directory")
+    ap.add_argument("--wandb-mode", choices=("online", "offline"), default="online",
+                    help="online falls back to offline when wandb.init fails")
     args = ap.parse_args(argv)
 
     cfg = Config.load(args.config) if args.config else Config()
@@ -131,13 +165,20 @@ def main(argv=None):
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    (out / "config.json").write_text(json.dumps(run_metadata(cfg, args), indent=2))
+    run_config = run_metadata(cfg, args)
+    (out / "config.json").write_text(json.dumps(run_config, indent=2))
     metrics_file = (out / "metrics.jsonl").open("a")
+    wandb_run = None
+    if args.wandb_project:
+        wandb_run = start_wandb(args.wandb_project, args.wandb_run_name or out.resolve().name, args.wandb_mode,
+                                run_config, out)
 
     def log(record):
         metrics_file.write(json.dumps(record) + "\n")
         metrics_file.flush()
         print(json.dumps(record), flush=True)
+        if wandb_run is not None:
+            wandb_run.log(wandb_record(record), step=record["batch"])
 
     torch.manual_seed(args.seed)
     rng = random.Random(args.seed)
@@ -154,29 +195,33 @@ def main(argv=None):
             result = evaluate(policy, val_games, args.eval_seeds, g.max_actions, g.parallel_episodes)
             log({"batch": batch, "split": "val", "eval_s": round(time.time() - start, 2), **result})
 
-    run_eval(0)
-    for batch in range(1, args.batches + 1):
-        if torch.cuda.is_available():
-            torch.cuda.reset_peak_memory_stats()
-        start = time.time()
-        jobs = []
-        for name, make_env, env_seed in (rng.choice(train_games) for _ in range(g.games_per_batch)):
-            jobs += [(name, make_env, env_seed, rng.randrange(2 ** 31)) for _ in range(g.group_size)]
-        stats = {}
-        episodes = collect_batch(policy, jobs, g.max_actions, g.parallel_episodes, stats)
-        groups = [episodes[i:i + g.group_size] for i in range(0, len(episodes), g.group_size)]
-        rollout_time = time.time() - start
-        metrics = trainer.step(groups)
-        peak = torch.cuda.max_memory_allocated() / 2 ** 30 if torch.cuda.is_available() else None
-        log({"batch": batch, "split": "train", "rollout_s": round(rollout_time, 2),
-             "update_s": round(time.time() - start - rollout_time, 2),
-             "reasoning_tokens": sum(len(d.reasoning_ids) for ep in episodes for d in ep.decisions),
-             "gpu_peak_gb": None if peak is None else round(peak, 2),
-             **rollout_metrics(episodes, stats, rollout_time, policy.eos_id), **metrics})
-        if batch % args.eval_every == 0 or batch == args.batches:
-            run_eval(batch)
-            if not (args.smoke or args.no_save):
-                model.save_pretrained(out / "checkpoints" / f"batch{batch:04d}")
+    try:
+        run_eval(0)
+        for batch in range(1, args.batches + 1):
+            if torch.cuda.is_available():
+                torch.cuda.reset_peak_memory_stats()
+            start = time.time()
+            jobs = []
+            for name, make_env, env_seed in (rng.choice(train_games) for _ in range(g.games_per_batch)):
+                jobs += [(name, make_env, env_seed, rng.randrange(2 ** 31)) for _ in range(g.group_size)]
+            stats = {}
+            episodes = collect_batch(policy, jobs, g.max_actions, g.parallel_episodes, stats)
+            groups = [episodes[i:i + g.group_size] for i in range(0, len(episodes), g.group_size)]
+            rollout_time = time.time() - start
+            metrics = trainer.step(groups)
+            peak = torch.cuda.max_memory_allocated() / 2 ** 30 if torch.cuda.is_available() else None
+            log({"batch": batch, "split": "train", "rollout_s": round(rollout_time, 2),
+                 "update_s": round(time.time() - start - rollout_time, 2),
+                 "reasoning_tokens": sum(len(d.reasoning_ids) for ep in episodes for d in ep.decisions),
+                 "gpu_peak_gb": None if peak is None else round(peak, 2),
+                 **rollout_metrics(episodes, stats, rollout_time, policy.eos_id), **metrics})
+            if batch % args.eval_every == 0 or batch == args.batches:
+                run_eval(batch)
+                if not (args.smoke or args.no_save):
+                    model.save_pretrained(out / "checkpoints" / f"batch{batch:04d}")
+    finally:
+        if wandb_run is not None:
+            wandb_run.finish()
     metrics_file.close()
 
 

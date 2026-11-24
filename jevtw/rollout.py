@@ -12,6 +12,7 @@ from typing import Callable, Sequence
 
 import torch
 
+from .envs import Observation
 from .policy import Decision, LMPolicy
 
 TIMING_KEYS = ("prompt_s", "gen_s", "score_s", "env_s")
@@ -42,13 +43,13 @@ def run_episode(policy: LMPolicy, env, game: str, env_seed: int, sample_seed: in
     """Play one episode until the game ends or max_actions (H) commands were issued; z = 1 only for a win."""
     obs = env.reset(env_seed)
     generator = torch.Generator().manual_seed(sample_seed)
-    history: list[tuple[str, str]] = []
+    history: list[tuple[str, Observation]] = []
     decisions = []
     while not obs.done and len(decisions) < max_actions:
         decision = policy.act(env.objective, history, obs, generator)
         decisions.append(decision)
         obs = env.step(decision.command)
-        history.append((decision.command, obs.text))
+        history.append((decision.command, obs))
     if not decisions:
         raise RuntimeError(f"{game}: the episode ended before the first decision")
     return Episode(game=game, env_seed=env_seed, sample_seed=sample_seed, decisions=decisions, won=obs.won,
@@ -139,7 +140,7 @@ def collect_batch(policy: LMPolicy, jobs: Sequence[tuple[str, Callable[[], objec
             for run in active:
                 command = run.decisions[-1].command
                 run.obs = run.env.step(command)
-                run.history.append((command, run.obs.text))
+                run.history.append((command, run.obs))
                 if run.obs.done or len(run.decisions) >= max_actions:
                     episodes[run.index] = Episode(game=run.game, env_seed=run.env_seed, sample_seed=run.sample_seed,
                                                   decisions=run.decisions, won=run.obs.won, finished=run.obs.done)

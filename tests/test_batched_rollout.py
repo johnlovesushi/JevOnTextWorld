@@ -65,7 +65,7 @@ def test_batched_reasoning_is_on_policy_with_left_padding(stop_policy):
     policy = stop_policy
     observations = [Observation("You are in a room. " * (i + 1), [f"option {j}" for j in range(2 + i)])
                     for i in range(6)]
-    prompts = [policy.encode_prompt("Win.", [("wait", "Time passes.")] * (i % 3), obs)
+    prompts = [policy.encode_prompt("Win.", [("wait", Observation("Time passes.", []))] * (i % 3), obs)
                for i, obs in enumerate(observations)]
     assert len({len(p) for p in prompts}) == len(prompts)
     seen = set()

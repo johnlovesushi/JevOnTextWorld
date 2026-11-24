@@ -7,6 +7,9 @@
 # runs/slurm/ has to exist before sbatch is called (mkdir -p runs/slurm).
 # Jobs run with the Hugging Face hub in offline mode for reproducibility, so the model, the pip packages
 # and the games must already be on disk (see "服务器环境" in CLAUDE.md).
+# W&B (optional, --wandb-project): the job inherits the submitting shell's environment (Slurm's default
+# --export=ALL), including any WANDB_* variables, and reads the key that `wandb login` stored in the home
+# directory. Never write a key into this script.
 #SBATCH --account=aip-rjliao
 #SBATCH --partition=gpubase_l40s_b3
 #SBATCH --gres=gpu:l40s:1
