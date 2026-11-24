@@ -1,0 +1,3 @@
+{"policy": {"max_reasoning_tokens": 0, "history_window": 8, "forecast": true, "history_mode": "full",
+            "forecast_format": "chat"},
+ "grpo": {"max_actions": 30, "parallel_episodes": 32}}
