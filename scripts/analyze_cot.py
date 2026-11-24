@@ -103,11 +103,14 @@ def per_state(cot) -> list:
     return out
 
 
-def reading_sample(cot) -> list:
+def reading_sample(cot, type="prepare") -> list:
+    """READ_N reasonings per setting on the L0 states of one action type. The `prepare` sample is the one the
+    issue asks for; the `eat` sample was added on the user's request and has its own seed string."""
     out = []
     for s in SETTINGS:
-        rows = sorted((r for r in cot if r["setting"] == s and r["level"] == "L0" and r["type"] == "prepare"), key=key)
-        out += random.Random(f"{READ_SEED}|{s}").sample(rows, min(READ_N, len(rows)))
+        rows = sorted((r for r in cot if r["setting"] == s and r["level"] == "L0" and r["type"] == type), key=key)
+        seed = f"{READ_SEED}|{s}" if type == "prepare" else f"{READ_SEED}|{s}|{type}"
+        out += random.Random(seed).sample(rows, min(READ_N, len(rows)))
     return out
 
 
@@ -197,6 +200,7 @@ def main(argv=None):
     ap.add_argument("--json")
     ap.add_argument("--reading", help="write the reading sample here (markdown)")
     ap.add_argument("--labels", help="JSON {key: class} for the reading sample")
+    ap.add_argument("--labels-eat", help="JSON {key: class} for the L0 `eat` reading sample (added after the issue)")
     ap.add_argument("--texts", help="write the full-text section here (markdown)")
     args = ap.parse_args(argv)
     cot = load(args.cot)
@@ -223,6 +227,16 @@ def main(argv=None):
         result["reading"] = labels_table(sample, labels)
         print("\n## Human reading\n")
         print(json.dumps({k: v for k, v in result["reading"].items() if k != "rows"}, indent=1))
+    if args.labels_eat:
+        labels = json.loads(Path(args.labels_eat).read_text())
+        sample = reading_sample(cot, "eat")
+        missing = [key(r) for r in sample if key(r) not in labels]
+        if missing:
+            ap.error(f"{len(missing)} sampled eat reasonings have no label, e.g. {missing[:3]}")
+        result["reading_eat_sample"] = [key(r) for r in sample]
+        result["reading_eat"] = labels_table(sample, labels)
+        print("\n## Human reading, eat\n")
+        print(json.dumps({k: v for k, v in result["reading_eat"].items() if k != "rows"}, indent=1))
     if args.texts:
         Path(args.texts).write_text(texts(cot))
     if args.json:

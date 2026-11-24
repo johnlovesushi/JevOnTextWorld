@@ -2310,5 +2310,881 @@
    "fn": 9,
    "tn": 26
   }
+ },
+ "reading_eat_sample": [
+  "full_plain|cook_r1_t1_g1_0022.z8|3|3",
+  "full_plain|cook_r1_t1_g1_0019.z8|3|0",
+  "full_plain|cook_r1_t1_g1_0004.z8|3|0",
+  "full_plain|cook_r1_t1_g1_0000.z8|3|2",
+  "full_plain|cook_r1_t1_g1_0006.z8|3|1",
+  "full_plain|cook_r1_t1_g1_0001.z8|3|2",
+  "full_plain|cook_r1_t1_g1_0022.z8|3|1",
+  "full_plain|cook_r1_t1_g1_0010.z8|3|1",
+  "full_plain|cook_r1_t1_g1_0019.z8|3|1",
+  "full_plain|cook_r1_t1_g1_0018.z8|3|0",
+  "full_plain|cook_r1_t1_g1_0021.z8|3|1",
+  "full_plain|cook_r1_t1_g1_0018.z8|3|4",
+  "full_plain|cook_r1_t1_g1_0018.z8|3|2",
+  "full_plain|cook_r1_t1_g1_0036.z8|3|0",
+  "full_plain|cook_r1_t1_g1_0027.z8|3|2",
+  "full_plain|cook_r1_t1_g1_0026.z8|3|4",
+  "full_plain|cook_r1_t1_g1_0007.z8|3|2",
+  "full_plain|cook_r1_t1_g1_0030.z8|3|0",
+  "full_plain|cook_r1_t1_g1_0002.z8|3|2",
+  "full_plain|cook_r1_t1_g1_0025.z8|3|2",
+  "full_chat|cook_r1_t1_g1_0034.z8|3|3",
+  "full_chat|cook_r1_t1_g1_0026.z8|3|4",
+  "full_chat|cook_r1_t1_g1_0030.z8|3|0",
+  "full_chat|cook_r1_t1_g1_0032.z8|3|2",
+  "full_chat|cook_r1_t1_g1_0014.z8|3|4",
+  "full_chat|cook_r1_t1_g1_0038.z8|3|3",
+  "full_chat|cook_r1_t1_g1_0000.z8|3|4",
+  "full_chat|cook_r1_t1_g1_0020.z8|3|3",
+  "full_chat|cook_r1_t1_g1_0022.z8|3|3",
+  "full_chat|cook_r1_t1_g1_0012.z8|3|1",
+  "full_chat|cook_r1_t1_g1_0034.z8|3|4",
+  "full_chat|cook_r1_t1_g1_0039.z8|3|1",
+  "full_chat|cook_r1_t1_g1_0001.z8|3|3",
+  "full_chat|cook_r1_t1_g1_0034.z8|3|1",
+  "full_chat|cook_r1_t1_g1_0025.z8|3|3",
+  "full_chat|cook_r1_t1_g1_0001.z8|3|4",
+  "full_chat|cook_r1_t1_g1_0020.z8|3|2",
+  "full_chat|cook_r1_t1_g1_0007.z8|3|1",
+  "full_chat|cook_r1_t1_g1_0036.z8|3|3",
+  "full_chat|cook_r1_t1_g1_0016.z8|3|2",
+  "feedback_plain|cook_r1_t1_g1_0010.z8|3|3",
+  "feedback_plain|cook_r1_t1_g1_0032.z8|3|4",
+  "feedback_plain|cook_r1_t1_g1_0037.z8|3|3",
+  "feedback_plain|cook_r1_t1_g1_0034.z8|3|4",
+  "feedback_plain|cook_r1_t1_g1_0002.z8|3|3",
+  "feedback_plain|cook_r1_t1_g1_0021.z8|3|0",
+  "feedback_plain|cook_r1_t1_g1_0003.z8|3|0",
+  "feedback_plain|cook_r1_t1_g1_0036.z8|3|2",
+  "feedback_plain|cook_r1_t1_g1_0037.z8|3|1",
+  "feedback_plain|cook_r1_t1_g1_0039.z8|3|3",
+  "feedback_plain|cook_r1_t1_g1_0007.z8|3|3",
+  "feedback_plain|cook_r1_t1_g1_0034.z8|3|3",
+  "feedback_plain|cook_r1_t1_g1_0014.z8|3|2",
+  "feedback_plain|cook_r1_t1_g1_0027.z8|3|2",
+  "feedback_plain|cook_r1_t1_g1_0025.z8|3|2",
+  "feedback_plain|cook_r1_t1_g1_0012.z8|3|2",
+  "feedback_plain|cook_r1_t1_g1_0016.z8|3|3",
+  "feedback_plain|cook_r1_t1_g1_0026.z8|3|1",
+  "feedback_plain|cook_r1_t1_g1_0027.z8|3|3",
+  "feedback_plain|cook_r1_t1_g1_0021.z8|3|3",
+  "feedback_chat|cook_r1_t1_g1_0025.z8|3|0",
+  "feedback_chat|cook_r1_t1_g1_0026.z8|3|4",
+  "feedback_chat|cook_r1_t1_g1_0008.z8|3|3",
+  "feedback_chat|cook_r1_t1_g1_0004.z8|3|1",
+  "feedback_chat|cook_r1_t1_g1_0036.z8|3|4",
+  "feedback_chat|cook_r1_t1_g1_0016.z8|3|4",
+  "feedback_chat|cook_r1_t1_g1_0005.z8|3|0",
+  "feedback_chat|cook_r1_t1_g1_0039.z8|3|2",
+  "feedback_chat|cook_r1_t1_g1_0036.z8|3|2",
+  "feedback_chat|cook_r1_t1_g1_0001.z8|3|0",
+  "feedback_chat|cook_r1_t1_g1_0036.z8|3|0",
+  "feedback_chat|cook_r1_t1_g1_0015.z8|3|1",
+  "feedback_chat|cook_r1_t1_g1_0000.z8|3|2",
+  "feedback_chat|cook_r1_t1_g1_0003.z8|3|4",
+  "feedback_chat|cook_r1_t1_g1_0010.z8|3|4",
+  "feedback_chat|cook_r1_t1_g1_0001.z8|3|4",
+  "feedback_chat|cook_r1_t1_g1_0010.z8|3|3",
+  "feedback_chat|cook_r1_t1_g1_0022.z8|3|4",
+  "feedback_chat|cook_r1_t1_g1_0025.z8|3|3",
+  "feedback_chat|cook_r1_t1_g1_0030.z8|3|1"
+ ],
+ "reading_eat": {
+  "counts": {
+   "full_plain": {
+    "A": 11,
+    "B": 7,
+    "D": 2
+   },
+   "full_chat": {
+    "A": 16,
+    "E": 1,
+    "B": 3
+   },
+   "feedback_plain": {
+    "B": 18,
+    "C": 1,
+    "D": 1
+   },
+   "feedback_chat": {
+    "B": 19,
+    "A": 1
+   }
+  },
+  "tags_by_class": {
+   "A": {
+    "n": 28,
+    "notices_done": 11,
+    "plans_process": 3,
+    "mean_q_star": 0.9997082927397319,
+    "mean_q_reprocess": 3.657932817842779e-06
+   },
+   "B": {
+    "n": 47,
+    "notices_done": 1,
+    "plans_process": 27,
+    "mean_q_star": 0.005803789729505701,
+    "mean_q_reprocess": 0.6297400500298482
+   },
+   "C": {
+    "n": 1,
+    "notices_done": 0,
+    "plans_process": 0,
+    "mean_q_star": 0.3431934118270874,
+    "mean_q_reprocess": 0.032332451024558395
+   },
+   "D": {
+    "n": 3,
+    "notices_done": 1,
+    "plans_process": 2,
+    "mean_q_star": 0.26466051273079455,
+    "mean_q_reprocess": 0.0009045808310474968
+   },
+   "E": {
+    "n": 1,
+    "notices_done": 0,
+    "plans_process": 0,
+    "mean_q_star": 1.0,
+    "mean_q_reprocess": 2.0187266441817897e-10
+   }
+  },
+  "rows": [
+   {
+    "key": "full_plain|cook_r1_t1_g1_0022.z8|3|3",
+    "class": "A",
+    "notices_done": true,
+    "plans_process": false,
+    "q_star": 0.9999991059303284,
+    "q_reprocess": 4.3665608018272906e-08,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_plain|cook_r1_t1_g1_0019.z8|3|0",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 1.2235935173521284e-05,
+    "q_reprocess": 0.7012264635413885,
+    "action": "cook meal with oven"
+   },
+   {
+    "key": "full_plain|cook_r1_t1_g1_0004.z8|3|0",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 3.3028252346412046e-06,
+    "q_reprocess": 0.9969213455915451,
+    "action": "cook meal with oven"
+   },
+   {
+    "key": "full_plain|cook_r1_t1_g1_0000.z8|3|2",
+    "class": "D",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 0.0007068729610182345,
+    "q_reprocess": 0.0022833366820123047,
+    "action": "put meal on counter"
+   },
+   {
+    "key": "full_plain|cook_r1_t1_g1_0006.z8|3|1",
+    "class": "A",
+    "notices_done": true,
+    "plans_process": true,
+    "q_star": 0.9999982118606567,
+    "q_reprocess": 2.470667581633279e-07,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_plain|cook_r1_t1_g1_0001.z8|3|2",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 1.9102883719313013e-09,
+    "q_reprocess": 2.3287793915471866e-08,
+    "action": "put meal on stove"
+   },
+   {
+    "key": "full_plain|cook_r1_t1_g1_0022.z8|3|1",
+    "class": "A",
+    "notices_done": true,
+    "plans_process": false,
+    "q_star": 0.9919761419296265,
+    "q_reprocess": 7.91191359894583e-05,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_plain|cook_r1_t1_g1_0010.z8|3|1",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 6.083509873633375e-08,
+    "q_reprocess": 0.9999508437067561,
+    "action": "cook meal with stove"
+   },
+   {
+    "key": "full_plain|cook_r1_t1_g1_0019.z8|3|1",
+    "class": "A",
+    "notices_done": true,
+    "plans_process": false,
+    "q_star": 0.999957799911499,
+    "q_reprocess": 3.5694992561730032e-06,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_plain|cook_r1_t1_g1_0018.z8|3|0",
+    "class": "A",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 0.9999982118606567,
+    "q_reprocess": 1.405416512056945e-07,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_plain|cook_r1_t1_g1_0021.z8|3|1",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 3.4042233892250806e-05,
+    "q_reprocess": 0.9573149681091309,
+    "action": "cook meal with stove"
+   },
+   {
+    "key": "full_plain|cook_r1_t1_g1_0018.z8|3|4",
+    "class": "A",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 0.9999980330467224,
+    "q_reprocess": 6.918461714633395e-08,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_plain|cook_r1_t1_g1_0018.z8|3|2",
+    "class": "A",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 0.9999991059303284,
+    "q_reprocess": 1.0327474014859561e-08,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_plain|cook_r1_t1_g1_0036.z8|3|0",
+    "class": "D",
+    "notices_done": true,
+    "plans_process": true,
+    "q_star": 0.7932711839675903,
+    "q_reprocess": 0.00040714407805353403,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_plain|cook_r1_t1_g1_0027.z8|3|2",
+    "class": "A",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 0.9999468326568604,
+    "q_reprocess": 1.6875513892955496e-05,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_plain|cook_r1_t1_g1_0026.z8|3|4",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 9.24271947866373e-09,
+    "q_reprocess": 1.5046347101588253e-07,
+    "action": "put meal on stove"
+   },
+   {
+    "key": "full_plain|cook_r1_t1_g1_0007.z8|3|2",
+    "class": "A",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 0.999961256980896,
+    "q_reprocess": 2.251170954536974e-06,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_plain|cook_r1_t1_g1_0030.z8|3|0",
+    "class": "B",
+    "notices_done": true,
+    "plans_process": true,
+    "q_star": 1.812523353628137e-09,
+    "q_reprocess": 7.700466824189789e-07,
+    "action": "put meal on stove"
+   },
+   {
+    "key": "full_plain|cook_r1_t1_g1_0002.z8|3|2",
+    "class": "A",
+    "notices_done": true,
+    "plans_process": true,
+    "q_star": 0.9999978542327881,
+    "q_reprocess": 8.800100204098271e-08,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_plain|cook_r1_t1_g1_0025.z8|3|2",
+    "class": "A",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 0.9999996423721313,
+    "q_reprocess": 7.922476452648652e-09,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_chat|cook_r1_t1_g1_0034.z8|3|3",
+    "class": "A",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 1.0,
+    "q_reprocess": 5.749993580231316e-12,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_chat|cook_r1_t1_g1_0026.z8|3|4",
+    "class": "E",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 1.0,
+    "q_reprocess": 2.0187266441817897e-10,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_chat|cook_r1_t1_g1_0030.z8|3|0",
+    "class": "A",
+    "notices_done": true,
+    "plans_process": false,
+    "q_star": 1.0,
+    "q_reprocess": 1.9889526657601575e-11,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_chat|cook_r1_t1_g1_0032.z8|3|2",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 1.595612530991275e-09,
+    "q_reprocess": 0.9993568144790004,
+    "action": "cook meal with stove"
+   },
+   {
+    "key": "full_chat|cook_r1_t1_g1_0014.z8|3|4",
+    "class": "A",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 1.0,
+    "q_reprocess": 1.5130731953819088e-12,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_chat|cook_r1_t1_g1_0038.z8|3|3",
+    "class": "A",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 1.0,
+    "q_reprocess": 1.1114349458135608e-12,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_chat|cook_r1_t1_g1_0000.z8|3|4",
+    "class": "A",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 1.0,
+    "q_reprocess": 4.432760907467637e-12,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_chat|cook_r1_t1_g1_0020.z8|3|3",
+    "class": "A",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 1.0,
+    "q_reprocess": 2.737993642573655e-12,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_chat|cook_r1_t1_g1_0022.z8|3|3",
+    "class": "A",
+    "notices_done": true,
+    "plans_process": false,
+    "q_star": 1.0,
+    "q_reprocess": 2.7783061224903594e-12,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_chat|cook_r1_t1_g1_0012.z8|3|1",
+    "class": "A",
+    "notices_done": true,
+    "plans_process": false,
+    "q_star": 1.0,
+    "q_reprocess": 1.8982278856410906e-12,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_chat|cook_r1_t1_g1_0034.z8|3|4",
+    "class": "A",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 1.0,
+    "q_reprocess": 5.622662708690274e-12,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_chat|cook_r1_t1_g1_0039.z8|3|1",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 0.008473161607980728,
+    "q_reprocess": 0.9891332865227014,
+    "action": "cook meal with oven"
+   },
+   {
+    "key": "full_chat|cook_r1_t1_g1_0001.z8|3|3",
+    "class": "A",
+    "notices_done": true,
+    "plans_process": false,
+    "q_star": 1.0,
+    "q_reprocess": 5.44767497171611e-12,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_chat|cook_r1_t1_g1_0034.z8|3|1",
+    "class": "A",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 1.0,
+    "q_reprocess": 9.516132239845154e-12,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_chat|cook_r1_t1_g1_0025.z8|3|3",
+    "class": "A",
+    "notices_done": true,
+    "plans_process": false,
+    "q_star": 1.0,
+    "q_reprocess": 4.902044482141266e-12,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_chat|cook_r1_t1_g1_0001.z8|3|4",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 7.792432606297528e-13,
+    "q_reprocess": 3.773019778552378e-10,
+    "action": "put meal on stove"
+   },
+   {
+    "key": "full_chat|cook_r1_t1_g1_0020.z8|3|2",
+    "class": "A",
+    "notices_done": true,
+    "plans_process": false,
+    "q_star": 1.0,
+    "q_reprocess": 1.0830844684658891e-12,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_chat|cook_r1_t1_g1_0007.z8|3|1",
+    "class": "A",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 1.0,
+    "q_reprocess": 5.885408371590628e-12,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_chat|cook_r1_t1_g1_0036.z8|3|3",
+    "class": "A",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 1.0,
+    "q_reprocess": 3.589692128616595e-12,
+    "action": "eat meal"
+   },
+   {
+    "key": "full_chat|cook_r1_t1_g1_0016.z8|3|2",
+    "class": "A",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 1.0,
+    "q_reprocess": 1.0665808731005755e-11,
+    "action": "eat meal"
+   },
+   {
+    "key": "feedback_plain|cook_r1_t1_g1_0010.z8|3|3",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 0.01233537495136261,
+    "q_reprocess": 0.475879717618227,
+    "action": "cook meal with stove"
+   },
+   {
+    "key": "feedback_plain|cook_r1_t1_g1_0032.z8|3|4",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 2.6112302293768153e-06,
+    "q_reprocess": 0.9989252928644419,
+    "action": "cook meal with oven"
+   },
+   {
+    "key": "feedback_plain|cook_r1_t1_g1_0037.z8|3|3",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 4.01489259616028e-08,
+    "q_reprocess": 0.9999703021239839,
+    "action": "cook meal with stove"
+   },
+   {
+    "key": "feedback_plain|cook_r1_t1_g1_0034.z8|3|4",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 2.1520586415135767e-06,
+    "q_reprocess": 0.9669342041015625,
+    "action": "cook meal with stove"
+   },
+   {
+    "key": "feedback_plain|cook_r1_t1_g1_0002.z8|3|3",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 0.00021566137729678303,
+    "q_reprocess": 0.16307451203465462,
+    "action": "insert meal into fridge"
+   },
+   {
+    "key": "feedback_plain|cook_r1_t1_g1_0021.z8|3|0",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 6.772783223141232e-08,
+    "q_reprocess": 0.9995172600902151,
+    "action": "cook meal with stove"
+   },
+   {
+    "key": "feedback_plain|cook_r1_t1_g1_0003.z8|3|0",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 0.001012614811770618,
+    "q_reprocess": 0.29298044741153717,
+    "action": "take chicken breast from fridge"
+   },
+   {
+    "key": "feedback_plain|cook_r1_t1_g1_0036.z8|3|2",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 3.053728732993477e-06,
+    "q_reprocess": 0.9935315846232697,
+    "action": "cook meal with stove"
+   },
+   {
+    "key": "feedback_plain|cook_r1_t1_g1_0037.z8|3|1",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 8.138345553021509e-10,
+    "q_reprocess": 0.9999995031075741,
+    "action": "cook meal with stove"
+   },
+   {
+    "key": "feedback_plain|cook_r1_t1_g1_0039.z8|3|3",
+    "class": "C",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 0.3431934118270874,
+    "q_reprocess": 0.032332451024558395,
+    "action": "insert meal into fridge"
+   },
+   {
+    "key": "feedback_plain|cook_r1_t1_g1_0007.z8|3|3",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 1.1820046097454906e-07,
+    "q_reprocess": 0.9993062655630638,
+    "action": "cook meal with stove"
+   },
+   {
+    "key": "feedback_plain|cook_r1_t1_g1_0034.z8|3|3",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 0.024886460974812508,
+    "q_reprocess": 0.08678506687283516,
+    "action": "close fridge"
+   },
+   {
+    "key": "feedback_plain|cook_r1_t1_g1_0014.z8|3|2",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 4.0734323647484416e-07,
+    "q_reprocess": 0.017524096721899696,
+    "action": "insert meal into oven"
+   },
+   {
+    "key": "feedback_plain|cook_r1_t1_g1_0027.z8|3|2",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 5.847689693583291e-11,
+    "q_reprocess": 3.7431472366122875e-09,
+    "action": "put meal on stove"
+   },
+   {
+    "key": "feedback_plain|cook_r1_t1_g1_0025.z8|3|2",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 2.1641749299305957e-06,
+    "q_reprocess": 0.9788848618045449,
+    "action": "cook meal with stove"
+   },
+   {
+    "key": "feedback_plain|cook_r1_t1_g1_0012.z8|3|2",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 1.765141678333748e-05,
+    "q_reprocess": 0.00017153016597148962,
+    "action": "take knife from table"
+   },
+   {
+    "key": "feedback_plain|cook_r1_t1_g1_0016.z8|3|3",
+    "class": "D",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 3.4812637750292197e-06,
+    "q_reprocess": 2.326173307665158e-05,
+    "action": "take red onion from fridge"
+   },
+   {
+    "key": "feedback_plain|cook_r1_t1_g1_0026.z8|3|1",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 3.2783162851046654e-08,
+    "q_reprocess": 5.906744263484143e-06,
+    "action": "put meal on counter"
+   },
+   {
+    "key": "feedback_plain|cook_r1_t1_g1_0027.z8|3|3",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 7.962981385389867e-09,
+    "q_reprocess": 0.9981859879626427,
+    "action": "cook meal with stove"
+   },
+   {
+    "key": "feedback_plain|cook_r1_t1_g1_0021.z8|3|3",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 1.1833208191092126e-05,
+    "q_reprocess": 0.005373271997086704,
+    "action": "close fridge"
+   },
+   {
+    "key": "feedback_chat|cook_r1_t1_g1_0025.z8|3|0",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 7.635412441198142e-11,
+    "q_reprocess": 0.9999992850780273,
+    "action": "cook meal with stove"
+   },
+   {
+    "key": "feedback_chat|cook_r1_t1_g1_0026.z8|3|4",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 3.2144249068055686e-11,
+    "q_reprocess": 6.264918935433572e-07,
+    "action": "put meal on counter"
+   },
+   {
+    "key": "feedback_chat|cook_r1_t1_g1_0008.z8|3|3",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 4.045262388951976e-12,
+    "q_reprocess": 1.0000000014227743,
+    "action": "cook meal with oven"
+   },
+   {
+    "key": "feedback_chat|cook_r1_t1_g1_0004.z8|3|1",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 3.822530070252128e-10,
+    "q_reprocess": 1.0000000094301766,
+    "action": "cook meal with stove"
+   },
+   {
+    "key": "feedback_chat|cook_r1_t1_g1_0036.z8|3|4",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 8.706457221840935e-10,
+    "q_reprocess": 0.9993435166500304,
+    "action": "cook meal with stove"
+   },
+   {
+    "key": "feedback_chat|cook_r1_t1_g1_0016.z8|3|4",
+    "class": "A",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 1.0,
+    "q_reprocess": 2.395606879101314e-12,
+    "action": "eat meal"
+   },
+   {
+    "key": "feedback_chat|cook_r1_t1_g1_0005.z8|3|0",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 9.295669123332573e-09,
+    "q_reprocess": 0.9862908882826105,
+    "action": "cook meal with stove"
+   },
+   {
+    "key": "feedback_chat|cook_r1_t1_g1_0039.z8|3|2",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 0.2003072202205658,
+    "q_reprocess": 0.7994018491608585,
+    "action": "eat meal"
+   },
+   {
+    "key": "feedback_chat|cook_r1_t1_g1_0036.z8|3|2",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 1.2041421193487167e-09,
+    "q_reprocess": 0.9986041817211455,
+    "action": "cook meal with stove"
+   },
+   {
+    "key": "feedback_chat|cook_r1_t1_g1_0001.z8|3|0",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 1.707060093281143e-08,
+    "q_reprocess": 0.07406612740847862,
+    "action": "put meal on stove"
+   },
+   {
+    "key": "feedback_chat|cook_r1_t1_g1_0036.z8|3|0",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 7.3186803284386315e-09,
+    "q_reprocess": 0.7994190711262696,
+    "action": "cook meal with stove"
+   },
+   {
+    "key": "feedback_chat|cook_r1_t1_g1_0015.z8|3|1",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 7.178103250682355e-11,
+    "q_reprocess": 0.9999992911764095,
+    "action": "cook meal with stove"
+   },
+   {
+    "key": "feedback_chat|cook_r1_t1_g1_0000.z8|3|2",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 1.010886152563728e-09,
+    "q_reprocess": 0.9999898139660095,
+    "action": "cook meal with stove"
+   },
+   {
+    "key": "feedback_chat|cook_r1_t1_g1_0003.z8|3|4",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 2.261362971878178e-11,
+    "q_reprocess": 3.517995159074694e-09,
+    "action": "put meal on stove"
+   },
+   {
+    "key": "feedback_chat|cook_r1_t1_g1_0010.z8|3|4",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 9.872956896472829e-10,
+    "q_reprocess": 0.9999998838478934,
+    "action": "cook meal with stove"
+   },
+   {
+    "key": "feedback_chat|cook_r1_t1_g1_0001.z8|3|4",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 2.5800504843687122e-08,
+    "q_reprocess": 0.3960513965326129,
+    "action": "cook meal with stove"
+   },
+   {
+    "key": "feedback_chat|cook_r1_t1_g1_0010.z8|3|3",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 1.4960858107926356e-09,
+    "q_reprocess": 0.000524361988650135,
+    "action": "put meal on stove"
+   },
+   {
+    "key": "feedback_chat|cook_r1_t1_g1_0022.z8|3|4",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": true,
+    "q_star": 2.565940949300627e-12,
+    "q_reprocess": 1.000000000990181,
+    "action": "cook meal with oven"
+   },
+   {
+    "key": "feedback_chat|cook_r1_t1_g1_0025.z8|3|3",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 0.02545776031911373,
+    "q_reprocess": 0.9231377989053726,
+    "action": "eat meal"
+   },
+   {
+    "key": "feedback_chat|cook_r1_t1_g1_0030.z8|3|1",
+    "class": "B",
+    "notices_done": false,
+    "plans_process": false,
+    "q_star": 1.2985548747401765e-10,
+    "q_reprocess": 0.9999997620287839,
+    "action": "cook meal with stove"
+   }
+  ],
+  "notices_done_vs_AC": {
+   "tp": 11,
+   "fp": 2,
+   "fn": 18,
+   "tn": 49
+  },
+  "plans_process_vs_B": {
+   "tp": 27,
+   "fp": 5,
+   "fn": 20,
+   "tn": 28
+  }
  }
 }

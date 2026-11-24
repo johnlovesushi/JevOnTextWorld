@@ -188,6 +188,18 @@ def test_analyze_cot(tmp_path, monkeypatch):
     (tmp_path / "labels.json").write_text(json.dumps(labels))
     reading = ac.main(args + ["--labels", str(tmp_path / "labels.json")])["reading"]
     assert reading["counts"]["full_plain"] == {"A": 20} and reading["counts"]["feedback_chat"] == {"B": 20}
+    # the eat sample (added on the user's request): other states, own seed, does not change the prepare sample
+    rows = ac.load(args[1])
+    with open(args[1], "a") as out:                                                               # the synthetic data has no eat rows
+        for r in rows:
+            if r["level"] == "L0" and r["type"] == "prepare":
+                out.write(json.dumps({**r, "type": "eat", "t": r["t"] + 1}) + "\n")
+    eat = ac.reading_sample(ac.load(args[1]), "eat")
+    assert len(eat) == 80 and all(r["type"] == "eat" and r["level"] == "L0" for r in eat)
+    (tmp_path / "labels_eat.json").write_text(json.dumps({ac.key(r): "A" for r in eat}))
+    both = ac.main(args + ["--labels", str(tmp_path / "labels.json"), "--labels-eat", str(tmp_path / "labels_eat.json")])
+    assert both["reading_sample"] == sample and both["reading_eat_sample"] == [ac.key(r) for r in eat]
+    assert sum(both["reading_eat"]["counts"][s].get("A", 0) for s in ac.SETTINGS) == len(eat)
     assert reading["notices_done_vs_AC"] == {"tp": 40, "fp": 0, "fn": 0, "tn": 40}
     assert reading["plans_process_vs_B"] == {"tp": 40, "fp": 0, "fn": 0, "tn": 40}
     assert reading["tags_by_class"]["B"]["mean_q_reprocess"] == pytest.approx(0.8)
