@@ -1,4 +1,4 @@
-"""Clipped GRPO loss (eq. 8), Brier calibration loss (eq. 9) and the optional reference KL.
+"""Clipped GRPO loss (eq. 8), calibration loss (eq. 9: Brier, or cross-entropy) and the optional reference KL.
 
 The total loss is a sum over decisions with weights fixed before optimisation, so it can be accumulated one
 decision at a time (bounded memory) and still equal
@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Sequence
 
 import torch
+import torch.nn.functional as F
 
 TermCounts = Sequence[Sequence[Sequence[int]]]   # [game][episode][decision] -> |c_t| + 1
 
@@ -37,7 +38,7 @@ def policy_weights(term_counts: TermCounts, normalization: str = "token") -> lis
 
 
 def calibration_weights(term_counts: TermCounts) -> list[list[list[float]]]:
-    """Weight of each decision's Brier term: 1 / (sum_i T_i * number of games)."""
+    """Weight of each decision's calibration term: 1 / (sum_i T_i * number of games)."""
     n_games = len(term_counts)
     out = []
     for game in term_counts:
@@ -68,13 +69,30 @@ def brier(p: torch.Tensor, z: float) -> torch.Tensor:
     return (p - z) ** 2
 
 
+def bce(logit: torch.Tensor, z: float) -> torch.Tensor:
+    """-z log p - (1 - z) log(1 - p) with p = sigmoid(logit), computed from the logit (stable for large |logit|).
+    Its gradient with respect to the logit is p - z; that of the Brier score is 2 (p - z) p (1 - p)."""
+    return F.binary_cross_entropy_with_logits(logit, torch.as_tensor(float(z), dtype=logit.dtype, device=logit.device))
+
+
+def calibration_loss(kind: str, logit: torch.Tensor, z: float) -> torch.Tensor:
+    """The calibration term of one decision from its (Platt-scaled) forecast logit."""
+    if kind == "brier":
+        return brier(torch.sigmoid(logit), z)
+    if kind == "bce":
+        return bce(logit, z)
+    raise ValueError(f"unknown calibration loss {kind!r}")
+
+
 def decision_loss(logps: torch.Tensor, old_logps: torch.Tensor, advantage: float, weight: float, eps: float, *,
                   ref_logps: torch.Tensor | None = None, beta: float = 0.0,
                   p: torch.Tensor | None = None, z: float | None = None, cal_weight: float = 0.0,
-                  alpha: float = 0.0, tis_weights: torch.Tensor | None = None) -> tuple[torch.Tensor, dict]:
+                  alpha: float = 0.0, tis_weights: torch.Tensor | None = None,
+                  cal_loss: str = "brier", logit: torch.Tensor | None = None) -> tuple[torch.Tensor, dict]:
     """One decision's contribution to L. logps / old_logps / ref_logps: (|c_t| + 1,) FP32, the last entry being the
-    action. `tis_weights` (same shape, constants) multiply the policy terms only, never the KL or the Brier term.
-    Returns the weighted scalar and unweighted diagnostics."""
+    action. `tis_weights` (same shape, constants) multiply the policy terms only, never the KL or the calibration
+    term. The calibration term is `cal_loss` of the forecast: "brier" takes the probability `p`, "bce" the
+    (Platt-scaled) `logit`. Returns the weighted scalar and unweighted diagnostics."""
     surrogate = clipped_surrogate(logps, old_logps, advantage, eps)
     if tis_weights is not None:
         surrogate = surrogate * tis_weights.detach()
@@ -93,9 +111,18 @@ def decision_loss(logps: torch.Tensor, old_logps: torch.Tensor, advantage: float
         loss = loss + beta * weight * kl.sum()
         stats["kl"] = float(kl.detach().sum())
     if alpha > 0:
-        if p is None or z is None:
-            raise ValueError("alpha > 0 needs the forecast p and the outcome z")
-        cal = brier(p, z)
+        if cal_loss == "brier":
+            if p is None or z is None:
+                raise ValueError("alpha > 0 needs the forecast p and the outcome z")
+            cal = brier(p, z)
+        elif cal_loss == "bce":
+            if logit is None or z is None:
+                raise ValueError("alpha > 0 with cal_loss = 'bce' needs the forecast logit and the outcome z")
+            cal = bce(logit, z)
+        else:
+            raise ValueError(f"unknown calibration loss {cal_loss!r}")
         loss = loss + alpha * cal_weight * cal
-        stats["brier"] = float(cal.detach())
+        stats["cal"] = float(cal.detach())
+        if cal_loss == "brier":
+            stats["brier"] = stats["cal"]
     return loss, stats

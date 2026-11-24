@@ -64,6 +64,10 @@ python -m jevtw.train --config configs/grpo_calibrated.json --model Qwen/Qwen3-1
 `runs/<name>/metrics.jsonl` 每个 batch 记录一行：胜率、平均回报、$b_i$、有胜有负的组数、
 有非零优势的组数、平均 $p_t$、每一遍的损失、梯度范数、裁剪比例、KL、校准损失。
 评测行另外记录 `forecast_brier`，也就是 $p_t$ 相对最终结果 $z$ 的 Brier 分数；以及 `forecast_brier_const` $= w(1-w)$
-（$w$ 是这次评测的胜率），即“永远预测 $w$”的 Brier 分数，作为参照。
+（$w$ 是这次评测按决策加权的胜率），即“永远预测 $w$”的 Brier 分数，作为参照。
+评测行还有预测 logit $s$ 的诊断：`forecast_auc`、`forecast_auc_t0`、`forecast_s_mean_win`、`forecast_s_mean_lose`；
+加 `--save-forecasts` 会把每次评测中每一步的 $s$、$p$ 写到 `runs/<name>/forecasts/batchNNNN.jsonl`。
+只评测一个 checkpoint：`python -m jevtw.train --model runs/<name>/checkpoints/batchNNNN --val-games … --batches 0 --save-forecasts --out runs/<新目录>`。
+预测的读法（`forecast_format`）、交叉熵校准损失（`cal_loss`）和 Platt 缩放（`platt`）见 `docs/implementation.md`。
 
 > 当前状态：CPU 测试和冒烟测试都通过了；还没有在 GPU 上用真实模型训练过。

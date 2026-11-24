@@ -6,7 +6,12 @@
   # CPU smoke run: tiny random model, byte tokenizer, KeyChest POMDP
   python -m jevtw.train --smoke --out runs/smoke
 
-Outputs in --out: config.json, metrics.jsonl (one line per batch / evaluation), checkpoints/batchNNNN/.
+  # Evaluate a checkpoint only, and dump every forecast
+  python -m jevtw.train --config <the run's config> --model runs/<ID>/checkpoints/batch0040 --batches 0 \
+      --val-games data/games/valid --train-games data/games/train --save-forecasts --out runs/<new ID>
+
+Outputs in --out: config.json, metrics.jsonl (one line per batch / evaluation), checkpoints/batchNNNN/ (model,
+tokenizer and, with Platt scaling, platt.json), and with --save-forecasts forecasts/batchNNNN.jsonl.
 With --wandb-project the same lines also go to Weights & Biases (optional; wandb is only imported then)."""
 from __future__ import annotations
 
@@ -22,8 +27,9 @@ from pathlib import Path
 import torch
 
 from .config import Config
+from .diagnostics import forecast_metrics, write_forecasts
 from .envs import KeyChestEnv, TextWorldEnv
-from .policy import LMPolicy
+from .policy import PLATT_FILE, LMPolicy
 from .rollout import collect_batch, rollout_metrics
 from .trainer import Trainer
 
@@ -63,22 +69,27 @@ def run_metadata(cfg: Config, args) -> dict:
     return {"meta": meta, "args": vars(args), **cfg.to_dict()}
 
 
-def evaluate(policy: LMPolicy, games, seeds, max_actions: int, parallel: int = 1) -> dict:
-    """One sampled episode per (game, seed). Reports the win rate, how well p_t forecast z, and sampling speed."""
+def evaluate(policy: LMPolicy, games, seeds, max_actions: int, parallel: int = 1,
+             forecasts_path: Path | None = None) -> dict:
+    """One sampled episode per (game, seed). Reports the win rate, how well the forecast predicted z
+    (`diagnostics.forecast_metrics`) and sampling speed; writes every forecast to `forecasts_path` when given."""
     jobs = [(name, make_env, env_seed, s) for name, make_env, env_seed in games for s in seeds]
     stats, start = {}, time.time()
     episodes = collect_batch(policy, jobs, max_actions, parallel, stats)
     sampling = rollout_metrics(episodes, stats, time.time() - start, policy.eos_id)
-    pairs = [(d.p, ep.z) for ep in episodes for d in ep.decisions if d.p is not None]
-    win_rate = sum(ep.z for ep in episodes) / len(episodes)
-    return {"episodes": len(episodes), "win_rate": win_rate,
+    if forecasts_path is not None:
+        write_forecasts(forecasts_path, episodes)
+    return {"episodes": len(episodes), "win_rate": sum(ep.z for ep in episodes) / len(episodes),
             "mean_length": sum(ep.length for ep in episodes) / len(episodes),
-            "forecast_brier": (sum((p - z) ** 2 for p, z in pairs) / len(pairs)) if pairs else None,
-            # Brier score of always forecasting the win rate w of this evaluation: w (1 - w). Reference for the line
-            # above (which averages over decisions, so the two differ slightly in weighting when lengths differ).
-            "forecast_brier_const": win_rate * (1 - win_rate) if pairs else None,
-            "mean_forecast": (sum(p for p, _ in pairs) / len(pairs)) if pairs else None,
-            **sampling}
+            **forecast_metrics(episodes), **sampling}
+
+
+def save_checkpoint(directory: Path, model, tokenizer, policy: LMPolicy) -> None:
+    """Model weights, the tokenizer (so that the directory can be given to --model on its own) and platt.json."""
+    model.save_pretrained(directory)
+    if hasattr(tokenizer, "save_pretrained"):         # the smoke run's ByteTokenizer has nothing to save
+        tokenizer.save_pretrained(directory)
+    policy.save_platt(directory)
 
 
 def wandb_record(record: dict) -> dict:
@@ -115,6 +126,11 @@ def load(args, cfg: Config):
 
         cfg.policy.yes_text, cfg.policy.no_text = "Y", "N"
         cfg.policy.confidence_prompt = "\nWill you win? Y or N:"
+        cfg.policy.chat_yes_text, cfg.policy.chat_no_text = "Y", "N"
+        if Path(args.model).is_dir():     # a checkpoint of an earlier smoke run
+            from transformers import AutoModelForCausalLM
+
+            return AutoModelForCausalLM.from_pretrained(args.model, dtype=torch.float32).eval(), ByteTokenizer()
         return tiny_model(seed=args.seed), ByteTokenizer()
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -122,6 +138,9 @@ def load(args, cfg: Config):
     dtype = torch.bfloat16 if device == "cuda" else torch.float32
     model = AutoModelForCausalLM.from_pretrained(args.model, revision=args.revision, dtype=dtype).to(device)
     model.eval()                          # dropout off: sampling and training forwards use the same function
+    # --revision names a revision of --model; a tokenizer given separately is loaded at its default revision.
+    if args.tokenizer:
+        return model, AutoTokenizer.from_pretrained(args.tokenizer)
     return model, AutoTokenizer.from_pretrained(args.model, revision=args.revision)
 
 
@@ -130,6 +149,7 @@ def main(argv=None):
     ap.add_argument("--config", help="JSON with optional 'policy' and 'grpo' sections")
     ap.add_argument("--model", default="Qwen/Qwen3-1.7B")
     ap.add_argument("--revision")
+    ap.add_argument("--tokenizer", help="tokenizer name or directory (default: the same as --model)")
     ap.add_argument("--train-games")
     ap.add_argument("--val-games")
     ap.add_argument("--val-limit", type=int, help="evaluate on the first N validation games only")
@@ -140,6 +160,9 @@ def main(argv=None):
     ap.add_argument("--seed", type=int, default=17)
     ap.add_argument("--no-save", action="store_true", help="do not write checkpoints")
     ap.add_argument("--smoke", action="store_true", help="tiny random model on KeyChest, CPU")
+    ap.add_argument("--save-forecasts", action="store_true",
+                    help="every evaluation writes forecasts/batchNNNN.jsonl: one line per episode with s and p of "
+                         "every step")
     ap.add_argument("--wandb-project", help="also log to this Weights & Biases project (off when not given)")
     ap.add_argument("--wandb-run-name", help="default: the name of the --out directory")
     ap.add_argument("--wandb-mode", choices=("online", "offline"), default="online",
@@ -151,14 +174,20 @@ def main(argv=None):
         cfg.policy.max_reasoning_tokens = min(cfg.policy.max_reasoning_tokens, 8)
         cfg.grpo.games_per_batch, cfg.grpo.group_size, cfg.grpo.max_actions = 2, 4, 4
         args.batches, args.eval_every, args.eval_seeds = min(args.batches, 3), 2, [0, 1]
-        args.model = "tiny-random-llama (smoke)"
+        if not Path(args.model).is_dir():
+            args.model = "tiny-random-llama (smoke)"
+    # A checkpoint with platt.json was trained with Platt scaling: its forecasts need a and b.
+    platt_file = Path(args.model) / PLATT_FILE
+    if platt_file.is_file() and not cfg.policy.platt:
+        print(f"{platt_file} found: turning PolicyConfig.platt on", flush=True)
+        cfg.policy.platt = True
     model, tokenizer = load(args, cfg)
     if args.smoke:
         train_games, val_games = keychest_games(range(8)), keychest_games(range(100, 104))
     else:
-        if not args.train_games:
-            ap.error("--train-games is required unless --smoke")
-        train_games = textworld_games(args.train_games)
+        if not args.train_games and args.batches > 0:
+            ap.error("--train-games is required unless --smoke or --batches 0")
+        train_games = textworld_games(args.train_games) if args.train_games else []
         val_games = textworld_games(args.val_games) if args.val_games else []
     if args.val_limit is not None:
         val_games = val_games[:args.val_limit]
@@ -186,13 +215,16 @@ def main(argv=None):
     if cfg.grpo.beta > 0:
         reference = copy.deepcopy(model).requires_grad_(False)
     policy = LMPolicy(model, tokenizer, cfg.policy)
+    if policy.load_platt(args.model):
+        print(f"loaded Platt parameters a = {float(policy.platt_a):.6g}, b = {float(policy.platt_b):.6g}", flush=True)
     trainer = Trainer(policy, cfg.grpo, reference_model=reference)
     g = cfg.grpo
 
     def run_eval(batch):
         if val_games:
             start = time.time()
-            result = evaluate(policy, val_games, args.eval_seeds, g.max_actions, g.parallel_episodes)
+            path = out / "forecasts" / f"batch{batch:04d}.jsonl" if args.save_forecasts else None
+            result = evaluate(policy, val_games, args.eval_seeds, g.max_actions, g.parallel_episodes, path)
             log({"batch": batch, "split": "val", "eval_s": round(time.time() - start, 2), **result})
 
     try:
@@ -217,8 +249,8 @@ def main(argv=None):
                  **rollout_metrics(episodes, stats, rollout_time, policy.eos_id), **metrics})
             if batch % args.eval_every == 0 or batch == args.batches:
                 run_eval(batch)
-                if not (args.smoke or args.no_save):
-                    model.save_pretrained(out / "checkpoints" / f"batch{batch:04d}")
+                if not args.no_save:
+                    save_checkpoint(out / "checkpoints" / f"batch{batch:04d}", model, tokenizer, policy)
     finally:
         if wandb_run is not None:
             wandb_run.finish()

@@ -51,7 +51,8 @@ def test_fp32_head_passes_gradients_to_bf16_parameters(tokenizer, policy_cfg):
     model = tiny_model(seed=0).to(torch.bfloat16)
     policy = LMPolicy(model, tokenizer, policy_cfg)
     d = policy.act("goal", [], KeyChestEnv().reset(0), torch.Generator().manual_seed(0))
-    logps, p = policy.score(d, forecast=True)
+    logps, s = policy.score(d, forecast=True)
+    p = policy.forecast_prob(s)
     (logps.sum() + p).backward()
     weight = model.get_output_embeddings().weight
     assert logps.dtype == p.dtype == torch.float32

@@ -11,13 +11,15 @@
 | (3) | 终局奖励 $z\in\{0,1\}$，只有赢才算 1 | `rollout.Episode.z`；输掉或走满 $H$ 步都是 0 |
 | (4) 上 | 推理 token $c_t\sim\pi^c_\theta$ | `policy.LMPolicy._sample_reasoning`（温度 1、全词表采样，保证采样分布就是 $\pi_\theta$） |
 | (4) 下 | 动作 $a_t\sim q_\theta=\mathrm{softmax}(\ell_\theta(a^j))$ | `policy.LMPolicy.decision_forward`：$\ell(a^j)$ = `Answer:` 之后续写 ` j<EOS>` 的对数似然 |
-| (5) | $p_t=\sigma(\ell(\text{yes})-\ell(\text{no}))$ | `policy.LMPolicy.decision_forward`（yes / no 两个 logit 由 FP32 输出层 `LMPolicy._head` 算出）；`readout.yes_no_probability` 是同一公式的独立实现，测试里用作参考 |
+| (5) | $s_t=\ell(\text{yes})-\ell(\text{no})$，$p_t=\sigma(s_t)$（开 Platt 时 $\sigma(a s_t+b)$，见补遗 A.4） | `policy.LMPolicy.decision_forward` 返回 $s$，`LMPolicy.forecast_prob` 把 $s$ 变成 $p$（yes / no 两个 logit 由 FP32 输出层 `LMPolicy._head` 算出）；`readout.yes_no_probability` 是同一公式的独立实现，测试里用作参考 |
 | 第 2 节末 | 同一局、同一初始状态下的 $G$ 条轨迹 | `train.py` 里同一局的 $G$ 个任务共用 `env_seed`，`sample_seed` 各不相同，由 `rollout.collect_batch` 采样 |
 | (6) | $b_i$、$R_i=z_i+\lambda b_i$ | `rewards.brier_bonus`、`rewards.episode_return`；在 `trainer.assign_returns` 中调用 |
 | (7) | 组内优势 $\widehat A_i$ | `rewards.group_advantages` |
 | (8) | 裁剪的 GRPO 损失，除以 $N=\sum(\lvert c\rvert+1)$ | `losses.clipped_surrogate`、`losses.policy_weights(..., "token")` |
 | (9) | Brier 损失 $\mathcal L_\text{cal}$，总损失 $\mathcal L$，按局平均 | `losses.calibration_weights`、`losses.decision_loss`、`trainer.Trainer.step` |
-| 命题 1 | $\mathcal L_\text{cal}$ 的最优解是 $P(z=1\mid h,c,a)$ | 测试 `test_proposition_1_brier_minimizer_is_success_probability` |
+| (A1) | 交叉熵校准损失（`cal_loss="bce"`） | `losses.bce`、`losses.calibration_loss` |
+| (A4) | Platt 缩放 $p=\sigma(a s+b)$ | `LMPolicy.platt_a / platt_b`、`calibrated_logit`、`init_platt_bias`；`Trainer._init_platt` |
+| 命题 1 | $\mathcal L_\text{cal}$ 的最优解是 $P(z=1\mid h,c,a)$（交叉熵下同样成立，补遗 A.3） | 测试 `test_proposition_1_brier_minimizer_is_success_probability` |
 
 把 $\lambda=\alpha=0$（`configs/grpo.json`）就回到普通多步 GRPO；
 `configs/grpo_calibrated.json` 打开校准（$\lambda=0.3,\ \alpha=0.1$）。
@@ -56,6 +58,69 @@
 **`p_options`。** $p_j$ 是“选了 $a^j$ 之后能赢的概率”，即命题 1 里的 $Q_\text{win}(h,c,a^j)$。
 采样时所有 $K$ 个 $p_j$ 都存进 `Decision.p_options`，$p_t$ = `Decision.p` = $p_{a_t}$；
 训练时 `score()` 只返回 $p_{a_t}$。`PolicyConfig.option_batch_size` 自 T0001 起不再使用，只为兼容旧配置而保留。
+
+**预测 logit $s$ 和概率 $p$（T0005）。** 记 $s=\ell(\text{yes})-\ell(\text{no})$。`decision_forward` 返回
+`(推理 log-prob, ℓ_j, s_j)`，`score()` 返回 `(log-prob, s_{a_t})`，都不再直接返回 $p$；$s\to p$ 只在
+`LMPolicy.forecast_prob` 一处做（$p=\sigma(s)$，开 Platt 时 $\sigma(as+b)$）。`Decision` 同时存
+`forecast_logit` / `forecast_logits_options`（$s$）和 `p` / `p_options`（经过 Platt 之后的 $p$）。
+存 $s$ 是因为 $p$ 饱和以后（E0003d 里 $p\approx1$）在 FP32 下已经分不出大小，AUC 之类的诊断必须在 $s$ 上算。
+
+**预测的三种读法（`PolicyConfig.forecast_format`，T0005）。** $\ell_j$ 的定义三种都一样（含 EOS 项），都只做一次前向。
+
+| 取值 | 读 $s_j$ 的序列 | 读哪两个 token |
+|---|---|---|
+| `"after_eos"`（默认） | $x\oplus y^j\oplus z$，$y^j$ = ` j<EOS>`，$z$ = `confidence_prompt` | `yes_text` / `no_text` |
+| `"no_eos"` | $x\oplus y^j_{:-1}\oplus z$：问题接在选项编号后面，中间没有 EOS | `yes_text` / `no_text` |
+| `"chat"` | $x\oplus y^j\oplus u$，$u$ = `\n<|im_start|>user\n{forecast_question}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n` | `chat_yes_text` / `chat_no_text`（默认 `Yes` / `No`） |
+
+- `after_eos` 和 `chat` 沿用上面的折叠方式，只是接在选项后面的那一段不同（`LMPolicy.forecast_tail_ids`）。
+- `no_eos` 下 $\ell_j$ 需要 EOS 而预测序列不能有 EOS，两者不再互为前缀，所以每个选项有两段：
+  打分段 $(x_{n-1})\oplus y^j$ 和预测段 $(x_{n-1})\oplus y^j_{:-1}\oplus z$，共 $2K$ 段。预测段只能看到前缀和它自己。
+- `chat` 的 $u$ 由 `policy.chat_forecast_suffix` 生成。Qwen3 的 EOS 就是 `<|im_end|>`，所以选项结尾的 EOS 正好是
+  上一轮 assistant 的结束符。`scripts/check_chat_forecast.py` 用真实分词器核对：$u$ 与
+  `apply_chat_template(..., enable_thinking=False)` 的输出逐字符相同，`Yes` / `No` 各是一个 token。
+- 采样、old、ref、训练用的都是 `LMPolicy._forecast_sequence` 定义的同一个序列；`Decision.confidence_ids` 存的就是它。
+- 三种格式之间 $\ell_j$ 的算术完全相同，但各行 padding 的长度不同，BLAS 的舍入可能不同：CPU 小模型上实测相差
+  0 或 1 个 FP32 ulp（$|\ell_j|\approx17$ 时 $1.9\times10^{-6}$），不是逐位相同。默认配置（`after_eos`）走的是和改动前
+  同一条代码路径，与改动前的结果逐位相同（`tests/snapshots/t0005_default.json`）。
+
+**校准损失（`GRPOConfig.cal_loss`，T0005）。** `"brier"`（默认）是 (9) 式；`"bce"` 是
+`binary_cross_entropy_with_logits(a·s+b, z)`（补遗 (A1)），直接在 logit 上算，不经过 $p$。两者的权重相同
+（`calibration_weights`）。$\lambda$ 项的 $b_i$ 不随 `cal_loss` 改变，始终是 Platt 之后的 $p$ 的 Brier。
+训练行的 `cal_loss` 是当前所用的损失在**采样时**的预测上的值（权重同上；$\alpha=0$ 时也记录，但不进损失），
+`cal_loss_kind` 写明是哪一种；`passes[k].cal_loss` 是第 $k$ 遍训练前向上的值（$\alpha=0$ 时校准项不计算，记为 0）。
+
+**Platt 缩放（`PolicyConfig.platt`，T0005）。** $p=\sigma(as+b)$，$a$、$b$ 是 `LMPolicy` 持有的两个 FP32 标量
+`nn.Parameter`，初值 $a=1,b=0$，不属于语言模型。
+
+- **数据初始化**（`Trainer._init_platt`，只在第一次更新前做一次；从带 `platt.json` 的 checkpoint 加载时不做）：
+  $b=\operatorname{logit}(\operatorname{clip}(\bar z,0.05,0.95))-\bar s$，$\bar z$ 是第一批按决策加权的胜率，
+  $\bar s$ 是第一批所有决策的 $s_{a_t}$ 的平均；$a$ 保持 1。初始化之后，第一批已经存下的 `Decision.p / p_options`
+  会用新的 $b$ 从存下的 $s$ 重算，所以第一批的 $b_i$（$\lambda$ 项）用的是初始化之后的 $p$。
+- **优化器**：$a,b$ 单独一个参数组，学习率 `GRPOConfig.platt_lr`（默认 $10^{-2}$），没有权重衰减。
+  学习率预热只作用于语言模型那一组；梯度裁剪和 `grad_norm` 也只算语言模型的参数。
+- **`GRPOConfig.cal_grad`**：`"full"`（默认）校准项的梯度同时流向语言模型和 $a,b$；`"platt_only"` 把 $s$ detach，
+  校准项只训练 $a,b$，语言模型只收到 GRPO 和 KL 的梯度（要求 `platt=True`，否则构造 `Trainer` 时报错）。
+- 训练行记录 `platt_a`、`platt_b`（更新前的值）。
+
+**预测诊断（`jevtw/diagnostics.py`，T0005）。** 评测行新增：
+
+| 字段 | 含义 |
+|---|---|
+| `forecast_auc` | 以每个决策为样本、$s_{a_t}$ 为分数、所在局的 $z$ 为标签的 AUC（Mann–Whitney，同分按 1/2 计）；全赢或全输时为 `null` |
+| `forecast_auc_t0` | 只用每局第一步的 AUC |
+| `forecast_s_mean_win` / `forecast_s_mean_lose` | 赢 / 输的局里所有决策的平均 $s$ |
+| `mean_forecast_logit` | 所有决策的平均 $s$（训练行也有） |
+| `forecast_brier_const` | $w(1-w)$，$w$ 现在是**按决策加权**的胜率（赢的局里的决策数 / 总决策数），和 `forecast_brier` 的样本一致；T0005 之前是按局的胜率 |
+
+`jevtw.train --save-forecasts` 在每次评测时写 `runs/<ID>/forecasts/batchNNNN.jsonl`，每局一行：
+`game, env_seed, sample_seed, z, length, steps`，每步 `{t, command, s, p, s_options}`。
+
+**Checkpoint 和 `--tokenizer`（T0005）。** `train.save_checkpoint` 除了模型，还保存分词器和（开 Platt 时）
+`platt.json`（`{"a":…, "b":…}`）。`--tokenizer` 指定分词器，默认与 `--model` 相同。`--model` 指向的目录里有
+`platt.json` 时会加载它，并且即使配置里 `platt=false` 也会打开 Platt（打印一行提示），这样评测 checkpoint 时
+$p$ 和训练时一致。`--batches 0` 只做一次评测，这时不需要 `--train-games`。`--smoke` 现在也保存 checkpoint，
+并且 `--model` 是目录时从该目录加载小模型（端到端测试用）。
 
 **$\lambda$ 项只用于奖励，$\alpha$ 项可以求梯度。** $b_i$ 用的是采样时（$\theta_\text{old}$）的 $p_t$，
 所以 $R_i$ 和 $\widehat A_i$ 都与梯度无关。$\alpha\mathcal L_\text{cal}$ 则在训练时重新读取 $p_\theta$，
@@ -179,4 +244,5 @@ $\mathrm{KL}(\pi_{\theta_\text{old}}\Vert\pi_\theta)$；第一遍严格为 0。�
 | `tests/test_batched_rollout.py` | 批量生成推理（prompt 长度各不相同、三种结束方式都出现）记录的概率等于 `score()`；同一行单独采样和放在 batch 里采样结果相同；`parallel=1` 的 `collect_batch` 与 `run_episode` 完全相同；同样的种子可复现；任务多于并行数时输出顺序和内容正确、同时打开的环境不超过并行数、出错时环境被关闭；无推理模式；TextWorld |
 | `tests/test_t0003.py` | bf16 小模型上 `_logprobs` 逐位等于 FP32 输出层的结果，梯度能流回 bf16 权重；不带推理时重算的 old 逐位等于采样时的概率，old / ref / 训练三处的 `forecast` 都等于 `policy.cfg.forecast`；$\alpha=0$ 时 $p$ 不进损失；TIS 关闭时损失不变、开启时等于手算值、权重不带梯度且不影响 KL 和校准项；warmup 每个 batch 的学习率、同一 batch 各遍相同、不开时不碰优化器；`kl_old` 第一遍为 0、更新后大于 0 |
 | `tests/test_t0004.py` | `history_mode="full"` 的提示词和改动前逐字相同（KeyChest 固定轨迹的快照、TextWorld 上按旧格式重建）；`"feedback"` 模式下房间描述、背包、notes 各出现一次；移动的反馈只保留房间标题；两种模式下 `collect_batch(parallel=1)` 等于 `run_episode`；不传 `--wandb-project` 时不 import wandb，传了之后 `init` / `log` / `finish` 的参数（step、`val/` 前缀、`pass1/`、`pass_last/`），online 初始化失败时改用 offline 并继续训练 |
+| `tests/test_t0005.py` | 默认配置下 $\ell_j$、$p$、两遍的损失和更新后的参数与改动前的快照逐位相同；三种 `forecast_format` 的序列构造、$\ell_j$ 一致（1e-5）、$s$ 和梯度等于“每个选项一条完整序列”的朴素参考（1e-4）；BCE 的数值和对 logit 的梯度 $p-z$，Brier 的梯度在 $p\to1$ 时消失；`platt_only` 下语言模型的更新与没有校准项时逐位相同；Platt 的数据初始化公式和截断、参数组学习率、预热不作用于 Platt 组、`platt.json` 存取；AUC 等于两两比较的暴力计数；`forecast_brier_const` 按决策加权；forecasts 记录的字段；端到端：`--smoke` 训练并保存 checkpoint，再用 `--model <目录> --batches 0 --save-forecasts` 评测 |
 | `tests/test_policy_trainer.py` | 提示词的历史窗口；KV cache 采样的概率等于打分的概率；共享前缀打分与朴素参考实现的数值、梯度一致（推理的四种结束方式，一位数和两位数选项）；嵌入层和输出层处理的 token 数等于“一次前缀 + 各选项后缀”；动作分布等于对选项的 softmax，`p_options` 等于逐选项读出的 $p_j$；无推理模式；同一组共享初始状态且可复现；第一遍的损失等于公式值（两种归一化）；参数确实被更新；$\lambda=\alpha=\beta=0$ 且全组结果相同时不更新；KL 的检查 |

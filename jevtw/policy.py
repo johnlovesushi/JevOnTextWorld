@@ -3,10 +3,12 @@
 At step t the model sees a prompt built from h_t, samples reasoning tokens c_t (temperature 1, full vocabulary, so the
 sampling law is exactly pi_theta), then picks a_t from q_theta = softmax over the K_t candidate commands, where the
 logit l(a^j) of option j is the log-likelihood of the continuation " j<EOS>" after "Answer:". Afterwards it can read
-the forecast p_t = sigmoid(l(yes) - l(no)) after a confidence question that is never written into the history.
+the forecast logit s_t = l(yes) - l(no) after a confidence question that is never written into the history;
+p_t = sigmoid(s_t), or sigmoid(a s_t + b) with Platt scaling (`forecast_prob`).
 
 All three come from one forward in `decision_forward`: the shared prefix (the action context) followed by the K
-suffixes "option j + confidence question", which are kept apart by the attention mask.
+suffixes "option j + confidence question", which are kept apart by the attention mask. Where the question stands
+relative to the option is `PolicyConfig.forecast_format`.
 
 Likelihood terms: every sampled reasoning token (its exact ids, including a sampled EOS or the tokens of "Answer:")
 and the single categorical action. Prompts, observations and the forced "Answer:" have none. Token ids are stored
@@ -14,7 +16,10 @@ and reused verbatim, so scoring never re-tokenises generated text."""
 from __future__ import annotations
 
 import inspect
+import json
+import math
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Sequence
 
 import torch
@@ -36,6 +41,8 @@ class Decision:
     behavior_logps: list[float]           # log-probs at sampling time: |c_t| reasoning tokens, then log q(a_t)
     p: float | None = None                # forecast at sampling time (theta_old), used for b_i
     p_options: list[float] | None = None  # p_j for every option j: "win probability if a^j were chosen" (Q_win)
+    forecast_logit: float | None = None   # s_t = l(yes) - l(no) of the chosen option, before Platt scaling
+    forecast_logits_options: list[float] | None = None    # s_j for every option j
     confidence_ids: list[int] | None = None
     old_logps: list[float] | None = field(default=None, repr=False)   # filled by the trainer
     ref_logps: list[float] | None = field(default=None, repr=False)
@@ -67,6 +74,16 @@ def build_prompt(objective: str, history: Sequence[tuple[str, Observation]], obs
     return "\n".join(lines)
 
 
+PLATT_FILE = "platt.json"
+
+
+def chat_forecast_suffix(question: str) -> str:
+    """What forecast_format "chat" appends after the option (which ends with EOS = <|im_end|>): a new user turn
+    with the question and the start of an assistant turn with empty thinking, as Qwen's chat template renders it
+    with enable_thinking=False (scripts/check_chat_forecast.py compares with the tokenizer's template)."""
+    return f"\n<|im_start|>user\n{question}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+
+
 class LMPolicy:
     def __init__(self, model, tokenizer, cfg: PolicyConfig):
         self.model, self.tokenizer, self.cfg = model, tokenizer, cfg
@@ -76,10 +93,24 @@ class LMPolicy:
         self.pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else self.eos_id
         self.answer_ids = self.encode("\n" + cfg.answer_prefix)
         self.confidence_prompt_ids = self.encode(cfg.confidence_prompt)
-        self.yes_id = single_token_id(tokenizer, cfg.yes_text)
-        self.no_id = single_token_id(tokenizer, cfg.no_text)
+        # What follows the option before the forecast is read, and the two tokens that are read.
+        if cfg.forecast_format == "chat":
+            self.forecast_tail_ids = self.encode(chat_forecast_suffix(cfg.forecast_question))
+            self.yes_id = single_token_id(tokenizer, cfg.chat_yes_text)
+            self.no_id = single_token_id(tokenizer, cfg.chat_no_text)
+        else:
+            self.forecast_tail_ids = self.confidence_prompt_ids
+            self.yes_id = single_token_id(tokenizer, cfg.yes_text)
+            self.no_id = single_token_id(tokenizer, cfg.no_text)
         if self.yes_id == self.no_id:
             raise ValueError("yes and no map to the same token")
+        # Platt scaling p = sigmoid(a s + b). FP32 like s; trained by the trainer in their own parameter group.
+        self.platt_a = self.platt_b = None
+        self.platt_initialized = False    # True once b was set from data (Trainer) or a, b were loaded
+        if cfg.platt:
+            device = next(model.parameters()).device
+            self.platt_a = torch.nn.Parameter(torch.ones((), dtype=torch.float32, device=device))
+            self.platt_b = torch.nn.Parameter(torch.zeros((), dtype=torch.float32, device=device))
         # Recent transformers renamed past_key_values to cache (argument and output field).
         params = inspect.signature(model.base_model.forward).parameters
         self._cache_kw = "cache" if "cache" in params else "past_key_values"
@@ -93,6 +124,45 @@ class LMPolicy:
 
     def _tensor(self, ids: Sequence[int]) -> torch.Tensor:
         return torch.tensor([list(ids)], dtype=torch.long, device=self.device)
+
+    # ---------------------------------------------------------------- forecast: s -> p
+
+    def calibrated_logit(self, s: torch.Tensor) -> torch.Tensor:
+        """a * s + b with Platt scaling, s itself without."""
+        return s if self.platt_a is None else self.platt_a * s + self.platt_b
+
+    def forecast_prob(self, s: torch.Tensor) -> torch.Tensor:
+        """p = sigmoid(s), or sigmoid(a s + b) with Platt scaling."""
+        return torch.sigmoid(self.calibrated_logit(s))
+
+    def platt_parameters(self) -> list[torch.nn.Parameter]:
+        return [] if self.platt_a is None else [self.platt_a, self.platt_b]
+
+    @torch.no_grad()
+    def init_platt_bias(self, win_rate: float, mean_logit: float) -> float:
+        """Data-dependent start: b = logit(clip(win_rate, 0.05, 0.95)) - a * mean_logit (a = 1 at that time), so
+        that the forecast at the mean logit is the (clipped) win rate."""
+        w = min(max(win_rate, 0.05), 0.95)
+        self.platt_b.fill_(math.log(w / (1.0 - w)) - float(self.platt_a) * mean_logit)
+        self.platt_initialized = True
+        return float(self.platt_b)
+
+    def save_platt(self, directory) -> None:
+        """Write platt.json ({"a": .., "b": ..}) into a checkpoint directory; nothing without Platt scaling."""
+        if self.platt_a is not None:
+            (Path(directory) / PLATT_FILE).write_text(json.dumps({"a": float(self.platt_a), "b": float(self.platt_b)}))
+
+    @torch.no_grad()
+    def load_platt(self, directory) -> bool:
+        """Read a, b from platt.json in `directory` if it is there (the policy must have platt = True)."""
+        path = Path(directory) / PLATT_FILE
+        if self.platt_a is None or not path.is_file():
+            return False
+        values = json.loads(path.read_text())
+        self.platt_a.fill_(float(values["a"]))
+        self.platt_b.fill_(float(values["b"]))
+        self.platt_initialized = True
+        return True
 
     # ---------------------------------------------------------------- sampling (theta_old, no gradients)
 
@@ -119,16 +189,24 @@ class LMPolicy:
         options = [self.encode(f" {j + 1}") + [self.eos_id] for j in range(len(obs.commands))]
         decision = Decision(command="", action=-1, prompt_ids=prompt_ids, reasoning_ids=reasoning,
                             action_context_ids=context, option_ids=options, behavior_logps=[])
-        _, scores, p = self.decision_forward(self.model, decision, forecast=cfg.forecast)
+        _, scores, s = self.decision_forward(self.model, decision, forecast=cfg.forecast)
         log_q = torch.log_softmax(scores, dim=0)
         action = int(torch.multinomial(log_q.exp().to(generator.device), 1, generator=generator))
         decision.command, decision.action = obs.commands[action], action
         decision.behavior_logps = logps + [float(log_q[action])]
-        if p is not None:
-            decision.confidence_ids = context + options[action] + self.confidence_prompt_ids
-            decision.p_options = [float(v) for v in p]
+        if s is not None:
+            decision.confidence_ids = self._forecast_sequence(context, options[action])
+            decision.forecast_logits_options = [float(v) for v in s]
+            decision.forecast_logit = decision.forecast_logits_options[action]
+            decision.p_options = [float(v) for v in self.forecast_prob(s)]
             decision.p = decision.p_options[action]
         return decision
+
+    def _forecast_sequence(self, context: list[int], option: list[int]) -> list[int]:
+        """The full sequence after whose last token the forecast of `option` is read."""
+        if self.cfg.forecast_format == "no_eos":
+            return context + option[:-1] + self.forecast_tail_ids
+        return context + option + self.forecast_tail_ids
 
     def _backbone(self, model, ids: torch.Tensor, cache=None, **kwargs):
         """Transformer body without the output layer. Returns (hidden states, KV cache)."""
@@ -243,8 +321,9 @@ class LMPolicy:
                          ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
         """Everything one decision needs from `model`, from a single forward in which the shared prefix appears once.
 
-        Returns (reasoning_logps (|c|,), option_scores l(a^j) (K,), p (K,) or None), all FP32. p[j] is the forecast
-        read after option j, i.e. "the probability of winning if a^j is chosen"; p[d.action] is p_t of eq. (5).
+        Returns (reasoning_logps (|c|,), option_scores l(a^j) (K,), s (K,) or None), all FP32. s[j] is the forecast
+        logit l(yes) - l(no) read after option j; `forecast_prob(s[j])` is "the probability of winning if a^j is
+        chosen", and `forecast_prob(s[d.action])` is p_t of eq. (5).
 
         With x = d.action_context_ids (length n), every sequence x + y^j shares the hidden states of its first n
         positions (causal attention). So the K suffixes r_j = (x[n-1]) + y^j (+ z, the confidence question, when
@@ -256,6 +335,9 @@ class LMPolicy:
         numbers and gradients are those of K full-context forwards, while keys/values exist once (a batch of K
         suffix rows on a KV cache would hold K copies of the prefix keys/values per layer: 22 GiB with gradients
         at n=2200, K=16). Appending z does not change l(a^j), again because attention is causal.
+        forecast_format "chat" only changes z. With "no_eos" the question must follow " j" without the EOS, which
+        r_j cannot provide (l(a^j) needs the EOS term), so r_j = (x[n-1]) + y^j and every option gets a second
+        segment f_j = (x[n-1]) + y^j[:-1] + z after all the r_j, again seeing only the prefix and itself.
         The logits at position i predict token i + 1, and the output layer is applied only where needed."""
         x, c, options = d.action_context_ids, d.reasoning_ids, d.option_ids
         n, n_prompt, k = len(x), len(d.prompt_ids), len(options)
@@ -266,8 +348,11 @@ class LMPolicy:
         assert n >= 2 and n_prompt >= 1 and n_prompt + len(c) <= n, (n_prompt, len(c), n)
         assert x[:n_prompt + max(len(c) - 1, 0)] == d.prompt_ids + c[:max(len(c) - 1, 0)]
 
-        tail = self.confidence_prompt_ids if forecast else []
-        rows = [[x[n - 1]] + opt + tail for opt in options]
+        tail = self.forecast_tail_ids if forecast else []
+        separate = forecast and self.cfg.forecast_format == "no_eos"
+        rows = [[x[n - 1]] + opt + ([] if separate else tail) for opt in options]
+        if separate:                      # forecast segments f_j; rows[k + j] belongs to option j
+            rows += [[x[n - 1]] + opt[:-1] + tail for opt in options]
         starts, total = [], n - 1                       # where each r_j begins in the folded sequence
         for r in rows:
             starts.append(total)
@@ -297,18 +382,20 @@ class LMPolicy:
         reasoning_logps, option_lp = token_lp[:len(c)], token_lp[len(c):]
         scores = torch.zeros(k, device=self.device, dtype=token_lp.dtype).index_add(0, row_idx, option_lp)
 
-        p = None
-        if forecast:                      # read at the last token of every r_j; only the yes / no logits are needed
-            last = torch.tensor([starts[j] + len(r) - 1 for j, r in enumerate(rows)], device=self.device)
+        s = None
+        if forecast:                      # read at the last token of r_j (f_j); only the yes / no logits are needed
+            first = k if separate else 0
+            last = torch.tensor([starts[first + j] + len(rows[first + j]) - 1 for j in range(k)], device=self.device)
             yes_no = self._head(model, hidden[last], rows=[self.yes_id, self.no_id])
-            p = torch.sigmoid(yes_no[:, 0] - yes_no[:, 1])
-        return reasoning_logps, scores, p
+            s = yes_no[:, 0] - yes_no[:, 1]
+        return reasoning_logps, scores, s
 
     def score(self, d: Decision, model=None, forecast: bool = False) -> tuple[torch.Tensor, torch.Tensor | None]:
-        """Log-probabilities of the decision's |c_t| + 1 terms under `model` (default: the policy), plus p_t when
-        `forecast`. One call to `decision_forward`; gradients flow when called outside torch.no_grad()."""
+        """Log-probabilities of the decision's |c_t| + 1 terms under `model` (default: the policy), plus the
+        forecast logit s_t when `forecast` (p_t = `forecast_prob(s_t)`). One call to `decision_forward`; gradients
+        flow when called outside torch.no_grad()."""
         model = self.model if model is None else model
-        reasoning_logps, scores, p = self.decision_forward(model, d, forecast=forecast)
+        reasoning_logps, scores, s = self.decision_forward(model, d, forecast=forecast)
         log_q = torch.log_softmax(scores, dim=0)
         logps = torch.cat([reasoning_logps, log_q[d.action:d.action + 1]])
-        return logps, (p[d.action] if p is not None else None)
+        return logps, (s[d.action] if s is not None else None)

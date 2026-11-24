@@ -7,6 +7,9 @@ from pathlib import Path
 
 NORMALIZATIONS = ("token", "episode")
 HISTORY_MODES = ("full", "feedback")
+FORECAST_FORMATS = ("after_eos", "no_eos", "chat")
+CAL_LOSSES = ("brier", "bce")
+CAL_GRADS = ("full", "platt_only")
 
 
 @dataclass
@@ -26,6 +29,19 @@ class PolicyConfig:
     yes_text: str = " yes"                # must encode to exactly one token
     no_text: str = " no"
     forecast: bool = True                 # compute p_t during rollouts (needed when lam > 0, logged otherwise)
+    # Where the forecast logit s = l(yes) - l(no) is read (T0005). x = action context, y^j = " j<EOS>":
+    #   "after_eos"  after x + y^j + confidence_prompt (the question follows the option's EOS);
+    #   "no_eos"     after x + " j" + confidence_prompt (no EOS before the question);
+    #   "chat"       after x + y^j + "\n<|im_start|>user\n{forecast_question}<|im_end|>\n<|im_start|>assistant\n
+    #                <think>\n\n</think>\n\n", reading chat_yes_text / chat_no_text (a new chat turn, Qwen template
+    #                with thinking off).
+    # The option scores l(a^j) are the same in all three.
+    forecast_format: str = "after_eos"
+    forecast_question: str = "Will you complete the objective? Answer yes or no."
+    chat_yes_text: str = "Yes"            # must encode to exactly one token (checked only for "chat")
+    chat_no_text: str = "No"
+    # Platt scaling: p = sigmoid(a * s + b) with two extra parameters owned by LMPolicy (a = 1, b = 0 at first).
+    platt: bool = False
     # Ignored since T0001 (all options are scored in one suffix batch on a shared prefix); kept so that old
     # configuration files still load.
     option_batch_size: int = 16
@@ -33,6 +49,8 @@ class PolicyConfig:
     def __post_init__(self):
         if self.history_mode not in HISTORY_MODES:
             raise ValueError(f"history_mode must be one of {HISTORY_MODES}, got {self.history_mode!r}")
+        if self.forecast_format not in FORECAST_FORMATS:
+            raise ValueError(f"forecast_format must be one of {FORECAST_FORMATS}, got {self.forecast_format!r}")
 
 
 @dataclass
@@ -61,6 +79,13 @@ class GRPOConfig:
     tis_cap: float | None = None
     # Learning rate of batch b (from 1) is learning_rate * min(1, b / warmup_batches); 0 = no warmup.
     warmup_batches: int = 0
+    # Calibration loss of the alpha term: "brier" = (p - z)^2, "bce" = -z log p - (1 - z) log(1 - p). The lambda
+    # bonus b_i always uses the Brier score.
+    cal_loss: str = "brier"
+    # "full": the calibration loss trains the language model (and a, b with Platt scaling); "platt_only": s is
+    # detached, so it trains only a and b.
+    cal_grad: str = "full"
+    platt_lr: float = 1e-2                # learning rate of a and b (own parameter group, no weight decay)
 
     def __post_init__(self):
         if not 0.0 <= self.lam < 1.0:
@@ -73,6 +98,12 @@ class GRPOConfig:
             raise ValueError("parallel_episodes must be at least 1")
         if self.tis_cap is not None and self.tis_cap <= 0:
             raise ValueError("tis_cap must be positive (or None to turn truncated importance sampling off)")
+        if self.cal_loss not in CAL_LOSSES:
+            raise ValueError(f"cal_loss must be one of {CAL_LOSSES}, got {self.cal_loss!r}")
+        if self.cal_grad not in CAL_GRADS:
+            raise ValueError(f"cal_grad must be one of {CAL_GRADS}, got {self.cal_grad!r}")
+        if self.platt_lr <= 0:
+            raise ValueError("platt_lr must be positive")
         if self.warmup_batches < 0:
             raise ValueError("warmup_batches must be non-negative")
         if self.group_size < 2:

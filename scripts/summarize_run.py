@@ -21,12 +21,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WINDOW = 10                               # batches averaged at the start and end of training
 TRAIN_KEYS = ("win_rate", "mean_return", "mean_bonus", "mixed_groups", "active_groups", "mean_length",
-              "mean_forecast", "decisions", "reasoning_tokens", "rollout_s", "update_s",
+              "mean_forecast", "mean_forecast_logit", "cal_loss", "platt_a", "platt_b", "decisions", "reasoning_tokens", "rollout_s", "update_s",
               "gen_s", "score_s", "env_s", "prompt_s", "mean_reasoning_tokens", "reasoning_end_answer",
               "reasoning_end_eos", "reasoning_end_cap", "mean_options", "behavior_old_mean_abs_diff", "lr")
 SAMPLING_KEYS = ("sec_per_decision", "gen_s", "score_s", "env_s", "prompt_s", "mean_reasoning_tokens",
                  "reasoning_end_answer", "reasoning_end_eos", "reasoning_end_cap", "mean_options")
 PASS_KEYS = ("loss", "grad_norm", "clip_frac", "kl", "cal_loss", "kl_old", "tis_mean_w", "tis_capped_frac")
+FORECAST_KEYS = ("forecast_auc", "forecast_auc_t0", "forecast_s_mean_win", "forecast_s_mean_lose",
+                 "mean_forecast_logit")
 LOGP_DIFF_WARN = 0.05
 CLIP_WARN = 0.2
 KL_OLD_WARN = 0.1                         # mean last-pass KL(pi_old || pi_theta) per likelihood term
@@ -131,8 +133,9 @@ def summarize(run_dir: Path, run_id: str, title: str) -> dict:
         "progress": {"batches_done": len(train), "batches_planned": planned,
                      "last_batch": train[-1]["batch"] if train else None},
         "val": [{k: r.get(k) for k in ("batch", "win_rate", "forecast_brier", "forecast_brier_const", "mean_forecast",
-                                       "mean_length",
+                                       "mean_length") + FORECAST_KEYS + (
                                        "episodes", "eval_s") + SAMPLING_KEYS} for r in val],
+        "cal_loss_kind": train[-1].get("cal_loss_kind") if train else None,
         "train_first": window_stats(train[:WINDOW]) if train else None,
         "train_last": window_stats(train[-WINDOW:]) if train else None,
         "gpu_peak_gb": max(peaks) if peaks else None,
@@ -172,6 +175,13 @@ def markdown(s: dict, log_tail: str | None, notes: str | None) -> str:
     lines += [f"| {v['batch']} | {fmt(v['win_rate'])} | {fmt(v['forecast_brier'])} | {fmt(v.get('forecast_brier_const'))} | "
               f"{fmt(v['mean_forecast'])} | "
               f"{fmt(v['mean_length'])} | {fmt(v['episodes'])} | {fmt(v['eval_s'])} |" for v in s["val"]]
+    if any(v.get(k) is not None for v in s["val"] for k in FORECAST_KEYS):
+        lines += ["", "Forecast logit s = l(yes) - l(no) during validation (one sample per decision, label z of its "
+                  "episode; AUC t0 uses the first decision of every episode only; the Brier columns above are over "
+                  "decisions too, w being the decision-weighted win rate):", "",
+                  "| batch | AUC | AUC t0 | mean s (won) | mean s (lost) | mean s |", "|---|---|---|---|---|---|"]
+        lines += ["| " + " | ".join([str(v["batch"])] + [fmt(v.get(k)) for k in FORECAST_KEYS]) + " |"
+                  for v in s["val"]]
     if any(v.get("sec_per_decision") is not None for v in s["val"]):
         lines += ["", "Sampling during validation (seconds are totals for the evaluation; the reasoning columns are "
                   "the mean token count and the fractions ending with the answer prefix / EOS / the token cap):", "",
@@ -187,7 +197,9 @@ def markdown(s: dict, log_tail: str | None, notes: str | None) -> str:
             if k != "batches":
                 lines.append(f"| {k} | {fmt(first[k])} | {fmt(last[k])} |")
         lines += ["", f"- peak GPU memory: {fmt(s['gpu_peak_gb'])} GiB",
-                  f"- max sampling vs training log-prob diff: {fmt(s['max_sampling_vs_old_logp_diff'])}"]
+                  f"- max sampling vs training log-prob diff: {fmt(s['max_sampling_vs_old_logp_diff'])}",
+                  f"- cal_loss is the {s.get('cal_loss_kind') or 'brier'} loss of the rollout forecasts (logged also "
+                  "when alpha = 0); first/last_pass_cal_loss are the values inside the update (0 when alpha = 0)"]
     if log_tail is not None:
         lines += ["", "## Log tail", "", "```", log_tail, "```"]
     lines += ["", "## Executor notes", "",
