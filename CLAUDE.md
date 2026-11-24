@@ -18,6 +18,7 @@
 4. **先跑测试**：`python -m pytest -q tests`。测试失败就停下来，在 issue 里报告。
 5. **使用实验配置**：每个实验对应 `configs/experiments/<ID>.json`，通常规划端已经写好。
    不要改 `configs/grpo*.json` 或 `jevtw/config.py` 里的默认值来跑实验。
+   **预运行（pilot）默认 `--batches 40 --eval-every 5`，除非 issue 另有规定。**
 6. **偏离任务时先说明**：任何和 issue 不一致的地方（改超参数、改命令、跳过步骤、修 bug），
    都要先在 issue 里留言说明原因。如果这个改动会影响结论，就等用户或规划端回复后再继续。
    纯环境问题（路径、模块名等）可以直接处理，但要在报告里写明。
@@ -68,6 +69,11 @@
 - **版本**：torch 2.14.1（CUDA 13.2）、transformers 5.22.2、textworld 1.7.0、jericho 3.3.1
 - **`HF_HOME`**：`/scratch/$USER/hf_cache`。`Qwen/Qwen3-1.7B` 已下载
   （revision `70d244cc86ccca08cf5af4e1e306ecf908b1ad5e`）。
+- **W&B（可选）**：`pip install --no-index wandb` 安装（不在 `requirements.txt` 里）。由**用户自己**在服务器上运行
+  `wandb login`；key 永远不进仓库，执行端也不经手。训练时加 `--wandb-project <项目>` 才启用
+  （`--wandb-run-name` 默认是输出目录名，`--wandb-mode {online,offline}` 默认 online，online 初始化失败会自动改用
+  offline，之后可以用 `wandb sync` 上传）。作业会继承提交时 shell 里的 `WANDB_*` 环境变量（Slurm 默认行为），
+  不要在脚本里写 key。规划端看不到 W&B，`reports/` 照常生成。
 - **网络**：计算节点可以联网，但作业一律用离线模式（`HF_HUB_OFFLINE=1`）运行，以保证可复现；
   模型、pip 包、游戏数据都要先在登录节点准备好。
 - **Slurm**：分区 `gpubase_l40s_b3`（每节点 4 张 L40S、64 核、约 500 GB 内存，时限 24 小时），

@@ -45,15 +45,17 @@ class Decision:
         return len(self.reasoning_ids) + 1
 
 
-def build_prompt(objective: str, history: Sequence[tuple[str, str]], obs: Observation, cfg: PolicyConfig) -> str:
-    """Text of h_t: the objective, the last `history_window` (command, observation) pairs, the current observation
+def build_prompt(objective: str, history: Sequence[tuple[str, Observation]], obs: Observation,
+                 cfg: PolicyConfig) -> str:
+    """Text of h_t: the objective, the last `history_window` steps (the command and, depending on
+    `history_mode`, the whole observation that followed or only the game's feedback), the current observation
     and the numbered admissible commands."""
     lines = [f"Objective: {objective}", ""]
     recent = list(history)[-cfg.history_window:] if cfg.history_window > 0 else []
     if recent:
         lines.append("Recent steps:")
-        for cmd, text in recent:
-            lines += [f"> {cmd}", text, ""]
+        for cmd, after in recent:
+            lines += [f"> {cmd}", after.feedback if cfg.history_mode == "feedback" else after.text, ""]
     lines += ["Current observation:", obs.text, "", "Options:"]
     lines += [f"{j + 1}. {c}" for j, c in enumerate(obs.commands)]
     lines.append("")
@@ -95,7 +97,7 @@ class LMPolicy:
     # ---------------------------------------------------------------- sampling (theta_old, no gradients)
 
     @torch.no_grad()
-    def act(self, objective: str, history: Sequence[tuple[str, str]], obs: Observation,
+    def act(self, objective: str, history: Sequence[tuple[str, Observation]], obs: Observation,
             generator: torch.Generator) -> Decision:
         """One decision for one episode (the serial reference; `rollout.collect_batch` uses the three steps below
         with `sample_reasoning_batch` in place of `_sample_reasoning`)."""
@@ -103,7 +105,7 @@ class LMPolicy:
         reasoning, logps = self._sample_reasoning(prompt_ids, generator)
         return self.decide(prompt_ids, reasoning, logps, obs, generator)
 
-    def encode_prompt(self, objective: str, history: Sequence[tuple[str, str]], obs: Observation) -> list[int]:
+    def encode_prompt(self, objective: str, history: Sequence[tuple[str, Observation]], obs: Observation) -> list[int]:
         if not obs.commands:
             raise ValueError("no admissible commands")
         return self.encode(build_prompt(objective, history, obs, self.cfg))

@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 NORMALIZATIONS = ("token", "episode")
+HISTORY_MODES = ("full", "feedback")
 
 
 @dataclass
@@ -16,6 +17,10 @@ class PolicyConfig:
     reasoning_prefix: str = "Reasoning:"
     answer_prefix: str = "Answer:"        # sampling c_t stops once the reasoning ends with this, or at EOS
     history_window: int = 8               # past (command, observation) pairs shown; h_t is truncated to this
+    # What a past step shows after its command: "full" = the whole observation that followed (room, inventory and
+    # notes again at every step), "feedback" = only what the game answered (Observation.feedback). The current
+    # observation is always shown in full.
+    history_mode: str = "full"
     # p_t = sigmoid(l(yes) - l(no)) read after this question; it is never written into the history.
     confidence_prompt: str = "\nQuestion: will you complete the objective? Answer yes or no:"
     yes_text: str = " yes"                # must encode to exactly one token
@@ -24,6 +29,10 @@ class PolicyConfig:
     # Ignored since T0001 (all options are scored in one suffix batch on a shared prefix); kept so that old
     # configuration files still load.
     option_batch_size: int = 16
+
+    def __post_init__(self):
+        if self.history_mode not in HISTORY_MODES:
+            raise ValueError(f"history_mode must be one of {HISTORY_MODES}, got {self.history_mode!r}")
 
 
 @dataclass

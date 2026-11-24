@@ -31,10 +31,11 @@ jevtw/
   trainer.py     一次 GRPO 更新
   train.py       训练循环与评测（含 --smoke CPU 冒烟）
   testing.py     字节分词器 + 随机小模型（测试用，不需要下载）
-configs/         grpo.json（λ=α=0）、grpo_calibrated.json（λ=0.3, α=0.1）
+configs/         grpo.json（λ=α=0）、grpo_calibrated.json（λ=0.3, α=0.1）、grpo_feedback.json（grpo.json + history_mode=feedback）
   experiments/   每个实验一份配置：<ID>.json
 scripts/         make_games.py：用 tw-make 生成 cooking 游戏
                  summarize_run.py：把一次运行整理成固定格式的报告
+                 prompt_tokens.py：按通关路线统计两种 history_mode 下提示词的 token 数（CPU）
 reports/         实验报告 <ID>.md / <ID>.json
 tests/           CPU 单元测试
 CLAUDE.md        给服务器端 agent 的工作说明

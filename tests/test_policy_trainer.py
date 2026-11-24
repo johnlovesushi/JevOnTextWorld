@@ -26,7 +26,7 @@ def count_head_rows(monkeypatch) -> list[int]:
 
 
 def test_prompt_shows_window_and_numbered_options(policy_cfg):
-    history = [(f"cmd{i}", f"obs{i}") for i in range(5)]
+    history = [(f"cmd{i}", Observation(f"obs{i}", [])) for i in range(5)]
     text = build_prompt("Win.", history, Observation("here", ["open box", "wait"]), policy_cfg)
     assert "cmd1" not in text and "cmd2" in text and "cmd4" in text           # window of 3
     assert "1. open box\n2. wait" in text and text.endswith(policy_cfg.reasoning_prefix)

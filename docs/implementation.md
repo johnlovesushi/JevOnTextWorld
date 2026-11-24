@@ -109,6 +109,11 @@ $\mathrm{KL}(\pi_{\theta_\text{old}}\Vert\pi_\theta)$；第一遍严格为 0。�
 
 **历史截断。** 提示词只显示最近 `history_window` 步；菜谱一旦读过，会作为 notes 一直保留。
 这是对 $h_t$ 的近似：notes 只是历史的函数，不包含任何特权信息。
+`history_mode` 决定过去每一步在命令之后显示什么：`"full"`（默认，旧实验的行为）显示这一步之后的整份观测，
+房间描述、背包和 notes 在每一步都重复；`"feedback"` 只显示游戏对这条命令的回应（`Observation.feedback`：
+不含房间描述、背包和 notes；移动之后只保留新房间的标题行，如 `-= Kitchen =-`）。当前观测总是完整给出一次。
+两种模式下 $h_t$ 包含的信息在窗口内基本相同（`"feedback"` 少了窗口内更早房间的描述），所以这也是对 $h_t$ 的截断近似。
+参考配置 `configs/grpo_feedback.json` 和 `grpo.json` 只差这一项。
 
 **TextWorld 观测。** 默认去掉 look / inventory / examine X（cookbook 除外）这些纯信息命令，
 因为观测里已经显示了房间和背包。默认也删除 “Your score has just gone up” 这类提示，
@@ -173,4 +178,5 @@ $\mathrm{KL}(\pi_{\theta_\text{old}}\Vert\pi_\theta)$；第一遍严格为 0。�
 | `tests/test_envs.py` | KeyChest 的通关路线和部分可观测性；TextWorld 适配器按通关路线能赢、过滤掉的命令不在通关路线上、分数提示已删除、菜谱进入 notes；小模型能在真实 TextWorld 游戏里完成采样 |
 | `tests/test_batched_rollout.py` | 批量生成推理（prompt 长度各不相同、三种结束方式都出现）记录的概率等于 `score()`；同一行单独采样和放在 batch 里采样结果相同；`parallel=1` 的 `collect_batch` 与 `run_episode` 完全相同；同样的种子可复现；任务多于并行数时输出顺序和内容正确、同时打开的环境不超过并行数、出错时环境被关闭；无推理模式；TextWorld |
 | `tests/test_t0003.py` | bf16 小模型上 `_logprobs` 逐位等于 FP32 输出层的结果，梯度能流回 bf16 权重；不带推理时重算的 old 逐位等于采样时的概率，old / ref / 训练三处的 `forecast` 都等于 `policy.cfg.forecast`；$\alpha=0$ 时 $p$ 不进损失；TIS 关闭时损失不变、开启时等于手算值、权重不带梯度且不影响 KL 和校准项；warmup 每个 batch 的学习率、同一 batch 各遍相同、不开时不碰优化器；`kl_old` 第一遍为 0、更新后大于 0 |
+| `tests/test_t0004.py` | `history_mode="full"` 的提示词和改动前逐字相同（KeyChest 固定轨迹的快照、TextWorld 上按旧格式重建）；`"feedback"` 模式下房间描述、背包、notes 各出现一次；移动的反馈只保留房间标题；两种模式下 `collect_batch(parallel=1)` 等于 `run_episode`；不传 `--wandb-project` 时不 import wandb，传了之后 `init` / `log` / `finish` 的参数（step、`val/` 前缀、`pass1/`、`pass_last/`），online 初始化失败时改用 offline 并继续训练 |
 | `tests/test_policy_trainer.py` | 提示词的历史窗口；KV cache 采样的概率等于打分的概率；共享前缀打分与朴素参考实现的数值、梯度一致（推理的四种结束方式，一位数和两位数选项）；嵌入层和输出层处理的 token 数等于“一次前缀 + 各选项后缀”；动作分布等于对选项的 softmax，`p_options` 等于逐选项读出的 $p_j$；无推理模式；同一组共享初始状态且可复现；第一遍的损失等于公式值（两种归一化）；参数确实被更新；$\lambda=\alpha=\beta=0$ 且全组结果相同时不更新；KL 的检查 |
