@@ -472,3 +472,15 @@ def test_checkpoint_then_forecast_dump(tmp_path, platt, capsys):
         assert row["forecast_auc"] == pytest.approx(_brute_auc(*zip(*samples)))
     else:
         assert row["forecast_auc"] is None
+
+
+def test_forecast_by_step_script(tmp_path, capsys):
+    import sys
+    sys.path.insert(0, str(SNAPSHOT.parents[2] / "scripts"))
+    import forecast_by_step
+    episodes = [_episode("a", 1, [2.0, 3.0]), _episode("b", 0, [1.0]), _episode("c", 1, [4.0])]
+    rows = forecast_by_step.by_step(forecast_records(episodes), steps=3)
+    assert rows[0] == {"t": 0, "n_win": 2, "mean_win": 3.0, "n_lose": 1, "mean_lose": 1.0}
+    assert rows[1] == {"t": 1, "n_win": 1, "mean_win": 3.0, "n_lose": 0, "mean_lose": None}
+    assert rows[2]["n_win"] == 0 and rows[2]["mean_win"] is None
+    assert "| 1 | 1 | 3.000 | 0 | – |" in forecast_by_step.markdown(rows)
