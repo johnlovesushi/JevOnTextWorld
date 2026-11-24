@@ -25,7 +25,9 @@ def stats(rows) -> dict:
             "mean_K": mean(r["K"] for r in rows), "mean_prompt_tokens": mean(r["prompt_tokens"] for r in rows)}
 
 
-def teacher_tables(path) -> dict:
+def teacher_tables(path, optional=("drop",)) -> dict:
+    """`optional`: action types of the walkthrough that are not needed to win (on L1 `prepare meal` is already
+    admissible, and wins, at the `drop knife` step); "without_optional" leaves those states out."""
     rows, ends = [], []
     for line in Path(path).read_text().splitlines():
         r = json.loads(line)
@@ -35,7 +37,8 @@ def teacher_tables(path) -> dict:
         groups[r["model"], r["level"], r["variant"]].append(r)
         by_type[r["model"], r["level"], r["type"], r["variant"]].append(r)
         by_step[r["model"], r["level"], r["t"], r["variant"]].append(r)
-    out = {"walks": {}, "overall": [], "by_type": [], "by_step": [], "after_t0": []}
+    out = {"walks": {}, "overall": [], "by_type": [], "by_step": [], "after_t0": [], "without_optional": [],
+           "optional_types": list(optional)}
     for e in ends:
         w = out["walks"].setdefault(f'{e["model"]}|{e["level"]}', {"games": 0, "won": 0, "problems": []})
         w["games"] += 1
@@ -47,6 +50,8 @@ def teacher_tables(path) -> dict:
         # t = 0 has no history, so every variant sees the same prompt there; the later steps carry the difference
         out["after_t0"].append({"model": model, "level": level, "variant": variant,
                                 **stats([r for r in g if r["t"] > 0])})
+        out["without_optional"].append({"model": model, "level": level, "variant": variant,
+                                        **stats([r for r in g if r["type"] not in optional])})
     for (model, level, kind, variant), g in sorted(by_type.items()):
         out["by_type"].append({"model": model, "level": level, "type": kind, "variant": variant, **stats(g)})
     for (model, level, t, variant), g in sorted(by_step.items()):
@@ -67,12 +72,13 @@ def f(x, digits=3):
 
 
 def print_teacher(t: dict) -> None:
-    print("## Teacher-forced: all states\n")
-    print("| model | level | variant | states | mean log q(a*) | top-1 | mean rank | mean K | prompt tokens |")
-    print("|---|---|---|---|---|---|---|---|---|")
-    for r in t["overall"]:
-        print(f'| `{r["model"]}` | {r["level"]} | {r["variant"]} | {r["n"]} | {f(r["mean_logq"])} | {f(r["top1"])} | '
-              f'{f(r["mean_rank"], 2)} | {f(r["mean_K"], 1)} | {f(r["mean_prompt_tokens"], 0)} |')
+    for key, title in (("overall", "all states"), ("without_optional", f'without {t["optional_types"]} states')):
+        print(f"\n## Teacher-forced: {title}\n")
+        print("| model | level | variant | states | mean log q(a*) | top-1 | mean rank | mean K | prompt tokens |")
+        print("|---|---|---|---|---|---|---|---|---|")
+        for r in t[key]:
+            print(f'| `{r["model"]}` | {r["level"]} | {r["variant"]} | {r["n"]} | {f(r["mean_logq"])} | '
+                  f'{f(r["top1"])} | {f(r["mean_rank"], 2)} | {f(r["mean_K"], 1)} | {f(r["mean_prompt_tokens"], 0)} |')
     for key, title, col in (("by_type", "by action type", "type"), ("by_step", "by step", "t")):
         print(f"\n## Teacher-forced: top-1 rate {title} (mean log q in brackets)\n")
         print(f"| model | level | {col} | states | " + " | ".join(VARIANTS) + " |")

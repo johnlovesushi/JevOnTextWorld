@@ -113,6 +113,8 @@ def test_analysis_tables(tmp_path):
     assert overall["V1"]["top1"] == 1.0 and overall["V2"]["top1"] == 0.5 and overall["V2"]["mean_rank"] == 2.0
     assert overall["V2"]["mean_logq"] == pytest.approx(-1.3)
     assert {r["variant"]: r["n"] for r in t["after_t0"]} == {"V1": 1, "V2": 1}
+    assert [r["n"] for r in ah.teacher_tables(path, optional=("prepare",))["without_optional"]] == [1, 1]
+    assert [r["n"] for r in t["without_optional"]] == [2, 2]
     assert [(r["type"], r["variant"], r["top1"]) for r in t["by_type"]] == \
         [("prepare", "V1", 1.0), ("prepare", "V2", 0.0), ("take", "V1", 1.0), ("take", "V2", 1.0)]
     assert [(r["t"], r["a_star"]) for r in t["v1_hit_v2_miss"]] == [(1, "prepare x")]
