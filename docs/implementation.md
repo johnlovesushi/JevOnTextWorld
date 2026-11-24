@@ -115,6 +115,9 @@
 
 `jevtw.train --save-forecasts` 在每次评测时写 `runs/<ID>/forecasts/batchNNNN.jsonl`，每局一行：
 `game, env_seed, sample_seed, z, length, steps`，每步 `{t, command, s, p, s_options}`。
+`--save-reasonings`（E0004）在每次评测时写 `runs/<ID>/reasonings/batchNNNN.jsonl`，每个决策一行：
+`game, env_seed, sample_seed, z, length, t, command, reasoning_end, reasoning_tokens, reasoning`（推理的文本）。
+评测行里的 `gpu_peak_gb` 是这次评测期间的峰值显存（CPU 上为 `null`）。
 
 **Checkpoint 和 `--tokenizer`（T0005）。** `train.save_checkpoint` 除了模型，还保存分词器和（开 Platt 时）
 `platt.json`（`{"a":…, "b":…}`）。`--tokenizer` 指定分词器，默认与 `--model` 相同。`--model` 指向的目录里有

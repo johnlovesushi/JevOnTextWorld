@@ -71,3 +71,19 @@ def write_forecasts(path: Path, episodes: Sequence[Episode]) -> None:
     with path.open("w") as f:
         for record in forecast_records(episodes):
             f.write(json.dumps(record) + "\n")
+
+
+def reasoning_records(episodes: Sequence[Episode], decode) -> list[dict]:
+    """One record per decision: the episode it belongs to (game, env_seed, sample_seed, z, length), the step t,
+    the command, how the reasoning ended, its length in tokens and its text (`decode(reasoning_ids)`)."""
+    return [{"game": ep.game, "env_seed": ep.env_seed, "sample_seed": ep.sample_seed, "z": ep.z, "length": ep.length,
+             "t": t, "command": d.command, "reasoning_end": d.reasoning_end,
+             "reasoning_tokens": len(d.reasoning_ids), "reasoning": decode(d.reasoning_ids)}
+            for ep in episodes for t, d in enumerate(ep.decisions)]
+
+
+def write_reasonings(path: Path, episodes: Sequence[Episode], decode) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w") as f:
+        for record in reasoning_records(episodes, decode):
+            f.write(json.dumps(record) + "\n")
