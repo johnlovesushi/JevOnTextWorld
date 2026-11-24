@@ -18,10 +18,11 @@ from dataclasses import dataclass, field
 from typing import Sequence
 
 import torch
+import torch.nn.functional as F
 
 from .config import PolicyConfig
 from .envs import Observation
-from .readout import single_token_id, yes_no_probability
+from .readout import single_token_id
 
 
 @dataclass
@@ -135,11 +136,25 @@ class LMPolicy:
         return out.last_hidden_state, getattr(out, self._cache_kw)
 
     @staticmethod
-    def _logprobs(model, hidden: torch.Tensor) -> torch.Tensor:
-        """Output layer + FP32 log-softmax for the given hidden states, shape (rows, vocab). Only ever called on the
-        few positions whose next-token distribution is needed: full-vocabulary logits for a whole context do not
-        fit on a GPU (E0001)."""
-        return torch.log_softmax(model.get_output_embeddings()(hidden).float(), dim=-1)
+    def _head(model, hidden: torch.Tensor, rows: Sequence[int] | None = None) -> torch.Tensor:
+        """FP32 output layer: F.linear(hidden.float(), W.float()), shape (len(hidden), vocab), or only the columns
+        `rows` of the vocabulary. The backbone may run in bf16, but logits computed in bf16 are rounded to bf16
+        (spacing 0.125 for values between 16 and 32), which is far coarser than the log-prob differences the loss
+        works with (T0002, E0003). Casting the hidden states and W first keeps full precision; gradients still flow
+        back to the bf16 parameters through the cast."""
+        head = model.get_output_embeddings()
+        weight, bias = head.weight, getattr(head, "bias", None)
+        if rows is not None:
+            index = torch.as_tensor(rows, device=weight.device)
+            weight, bias = weight[index], None if bias is None else bias[index]
+        return F.linear(hidden.float(), weight.float(), None if bias is None else bias.float())
+
+    @classmethod
+    def _logprobs(cls, model, hidden: torch.Tensor) -> torch.Tensor:
+        """FP32 output layer + log-softmax for the given hidden states, shape (rows, vocab). Sampling (serial and
+        batched) and training all go through this one function. Only ever called on the few positions whose
+        next-token distribution is needed: full-vocabulary logits for a whole context do not fit on a GPU (E0001)."""
+        return torch.log_softmax(cls._head(model, hidden), dim=-1)
 
     def _sample_reasoning(self, prompt_ids: list[int], generator: torch.Generator) -> tuple[list[int], list[float]]:
         tokens, logps = [], []
@@ -269,25 +284,22 @@ class LMPolicy:
         hidden = model.base_model(input_ids=ids, attention_mask=mask[None, None], position_ids=position_ids,
                                   use_cache=False).last_hidden_state[0]
 
-        if c:
-            logprobs = self._logprobs(model, hidden[n_prompt - 1:n_prompt + len(c) - 1])
-            target = torch.tensor(c, device=self.device)
-            reasoning_logps = logprobs.gather(1, target[:, None])[:, 0]
-        else:
-            reasoning_logps = torch.zeros(0, device=self.device)
-
+        # One output-layer call for the reasoning tokens and the option tokens (W.float() is built once).
         # l_j = sum_{i=1..m_j} log softmax(lm_head(h_{j,i-1}))[y^j_i]; h_{j,0} is the state at x[n-1].
         row_idx = torch.tensor([j for j, opt in enumerate(options) for _ in opt], device=self.device)
-        pos_idx = torch.tensor([starts[j] + i for j, opt in enumerate(options) for i in range(len(opt))],
+        pos_idx = torch.tensor(list(range(n_prompt - 1, n_prompt + len(c) - 1))
+                               + [starts[j] + i for j, opt in enumerate(options) for i in range(len(opt))],
                                device=self.device)
-        target = torch.tensor([t for opt in options for t in opt], device=self.device)
+        target = torch.tensor(c + [t for opt in options for t in opt], device=self.device)
         token_lp = self._logprobs(model, hidden[pos_idx]).gather(1, target[:, None])[:, 0]
-        scores = torch.zeros(k, device=self.device, dtype=token_lp.dtype).index_add(0, row_idx, token_lp)
+        reasoning_logps, option_lp = token_lp[:len(c)], token_lp[len(c):]
+        scores = torch.zeros(k, device=self.device, dtype=token_lp.dtype).index_add(0, row_idx, option_lp)
 
         p = None
-        if forecast:                      # read at the last token of every r_j
+        if forecast:                      # read at the last token of every r_j; only the yes / no logits are needed
             last = torch.tensor([starts[j] + len(r) - 1 for j, r in enumerate(rows)], device=self.device)
-            p = yes_no_probability(model.get_output_embeddings()(hidden[last]), self.yes_id, self.no_id)
+            yes_no = self._head(model, hidden[last], rows=[self.yes_id, self.no_id])
+            p = torch.sigmoid(yes_no[:, 0] - yes_no[:, 1])
         return reasoning_logps, scores, p
 
     def score(self, d: Decision, model=None, forecast: bool = False) -> tuple[torch.Tensor, torch.Tensor | None]:

@@ -11,7 +11,7 @@
 | (3) | 终局奖励 $z\in\{0,1\}$，只有赢才算 1 | `rollout.Episode.z`；输掉或走满 $H$ 步都是 0 |
 | (4) 上 | 推理 token $c_t\sim\pi^c_\theta$ | `policy.LMPolicy._sample_reasoning`（温度 1、全词表采样，保证采样分布就是 $\pi_\theta$） |
 | (4) 下 | 动作 $a_t\sim q_\theta=\mathrm{softmax}(\ell_\theta(a^j))$ | `policy.LMPolicy.decision_forward`：$\ell(a^j)$ = `Answer:` 之后续写 ` j<EOS>` 的对数似然 |
-| (5) | $p_t=\sigma(\ell(\text{yes})-\ell(\text{no}))$ | `readout.yes_no_probability`，在 `policy.LMPolicy.decision_forward` 中读取 |
+| (5) | $p_t=\sigma(\ell(\text{yes})-\ell(\text{no}))$ | `policy.LMPolicy.decision_forward`（yes / no 两个 logit 由 FP32 输出层 `LMPolicy._head` 算出）；`readout.yes_no_probability` 是同一公式的独立实现，测试里用作参考 |
 | 第 2 节末 | 同一局、同一初始状态下的 $G$ 条轨迹 | `train.py` 里同一局的 $G$ 个任务共用 `env_seed`，`sample_seed` 各不相同，由 `rollout.collect_batch` 采样 |
 | (6) | $b_i$、$R_i=z_i+\lambda b_i$ | `rewards.brier_bonus`、`rewards.episode_return`；在 `trainer.assign_returns` 中调用 |
 | (7) | 组内优势 $\widehat A_i$ | `rewards.group_advantages` |
@@ -61,9 +61,38 @@
 所以 $R_i$ 和 $\widehat A_i$ 都与梯度无关。$\alpha\mathcal L_\text{cal}$ 则在训练时重新读取 $p_\theta$，
 梯度会直接流到 logit 上。
 
-**旧策略概率。** 优化前，每个决策都在 $\theta_\text{old}$ 下用和训练完全相同的前向重新打分一次，
-所以第一遍的比率严格等于 1。采样时（带 KV cache）记录的概率只用于诊断，
-记录在 `sampling_vs_old_max_abs_logp_diff` 里。
+**FP32 输出层（T0003）。** 主干可以用 bf16，但输出层一律按
+`F.linear(h.float(), W.float())` 计算再做 log-softmax（`LMPolicy._head` / `_logprobs`）。
+原来是先用 bf16 的 lm_head 算出 logits 再转 FP32，logits 已经被舍入到 bf16
+（值在 16 到 32 之间时相邻两个可表示值差 0.125），这个误差比损失里用到的 log-prob 差还大。
+采样（逐条和批量）和训练都走 `_logprobs` 这一个函数，梯度照常经过类型转换流回 bf16 的权重。
+读 $p$ 时只需要 yes / no 两个 logit，所以只取 $W$ 的这两行转 FP32（数学上等于整层 FP32 之后取两列）。
+`decision_forward` 里推理 token 和选项 token 合成一次输出层调用，$W$ 的 FP32 副本每个决策只建一次。
+
+**旧策略概率和序列一致（T0003）。** 优化前，每个决策都在 $\theta_\text{old}$ 下用和训练完全相同的前向重新打分一次，
+所以第一遍的比率严格等于 1。计算 old、ref 和训练这三处调用 `score()` 时都传 `forecast=policy.cfg.forecast`，
+也就是和采样时 `decide()` 完全相同的序列（采样时读了 $p$，每个选项后面就都接着确认问题）；
+只有 $\alpha>0$ 时才把 $p$ 放进损失。不带推理时，采样时的 $\log q(a)$ 和重算的 old 因此是同一个函数在同一个输入上的结果
+（FP32 CPU 上逐位相同）。带推理时，推理 token 的采样概率来自 KV cache 的增量前向，和整段前向仍有浮点误差。
+采样时记录的概率（`Decision.behavior_logps`）用于诊断：`sampling_vs_old_max_abs_logp_diff`（最大值）和
+`behavior_old_mean_abs_diff`（全部似然项上 $\lvert\text{old}-\text{behavior}\rvert$ 的平均），以及下面的 TIS。
+
+**截断重要性采样（`grpo.tis_cap`，T0003，默认关闭）。** 开启时，每个似然项 $u$ 的裁剪 surrogate 乘上
+
+$$w_u=\min\big(\exp(\text{old}_u-\text{behavior}_u),\ C\big),\qquad C=\texttt{tis\_cap}$$
+
+（`losses.tis_weights`）。$w_u$ 是常数，不参与求导；只乘在 policy 项上，不乘 KL 项和校准项。
+它修正的是“样本实际按 behavior 的概率采出，而损失把它们当作按 old 采出”这一偏差。
+每一遍记录 `tis_mean_w`（$w_u$ 的平均）和 `tis_capped_frac`（未截断的比值超过 $C$ 的比例）。
+
+**学习率 warmup（`grpo.warmup_batches`，T0003，默认 0）。** 第 $b$ 个 batch（从 1 开始）的学习率是
+$\text{lr}\cdot\min(1,b/\texttt{warmup\_batches})$，同一个 batch 的各遍相同；`Trainer.batches_done` 记录已完成的 batch 数，
+实际用的值记录在 `lr` 里。需要它是因为 Adam 第一步的更新量约等于 $\text{lr}\cdot\mathrm{sign}(g)$，与梯度大小无关。
+`warmup_batches=0` 时不碰优化器的学习率。
+
+**更新幅度 `kl_old`（T0003）。** 每一遍记录 $\frac1{N}\sum_u(r_u-\log r_u-1)$，$r_u=\pi_\theta(u)/\pi_{\theta_\text{old}}(u)$，
+在本 batch 所有参与更新的似然项上取平均。样本（近似）来自 $\pi_{\theta_\text{old}}$，所以它估计的是
+$\mathrm{KL}(\pi_{\theta_\text{old}}\Vert\pi_\theta)$；第一遍严格为 0。最后一遍的平均值超过 0.1 时 `scripts/summarize_run.py` 会报警。
 
 **归一化（`grpo.normalization`）。**
 
@@ -143,4 +172,5 @@
 | `tests/test_math.py` | (5) 式等于两类 softmax、平移不变性、Brier 对 logit 的梯度；(6) 式的手算例子、任何赢都大于任何输、$\lambda$ 的取值范围；(7) 式；(8)–(9) 式两种归一化的权重，以及逐决策累加的结果等于直接按公式计算；裁剪的 5 种情况；KL；命题 1；配置校验 |
 | `tests/test_envs.py` | KeyChest 的通关路线和部分可观测性；TextWorld 适配器按通关路线能赢、过滤掉的命令不在通关路线上、分数提示已删除、菜谱进入 notes；小模型能在真实 TextWorld 游戏里完成采样 |
 | `tests/test_batched_rollout.py` | 批量生成推理（prompt 长度各不相同、三种结束方式都出现）记录的概率等于 `score()`；同一行单独采样和放在 batch 里采样结果相同；`parallel=1` 的 `collect_batch` 与 `run_episode` 完全相同；同样的种子可复现；任务多于并行数时输出顺序和内容正确、同时打开的环境不超过并行数、出错时环境被关闭；无推理模式；TextWorld |
+| `tests/test_t0003.py` | bf16 小模型上 `_logprobs` 逐位等于 FP32 输出层的结果，梯度能流回 bf16 权重；不带推理时重算的 old 逐位等于采样时的概率，old / ref / 训练三处的 `forecast` 都等于 `policy.cfg.forecast`；$\alpha=0$ 时 $p$ 不进损失；TIS 关闭时损失不变、开启时等于手算值、权重不带梯度且不影响 KL 和校准项；warmup 每个 batch 的学习率、同一 batch 各遍相同、不开时不碰优化器；`kl_old` 第一遍为 0、更新后大于 0 |
 | `tests/test_policy_trainer.py` | 提示词的历史窗口；KV cache 采样的概率等于打分的概率；共享前缀打分与朴素参考实现的数值、梯度一致（推理的四种结束方式，一位数和两位数选项）；嵌入层和输出层处理的 token 数等于“一次前缀 + 各选项后缀”；动作分布等于对选项的 softmax，`p_options` 等于逐选项读出的 $p_j$；无推理模式；同一组共享初始状态且可复现；第一遍的损失等于公式值（两种归一化）；参数确实被更新；$\lambda=\alpha=\beta=0$ 且全组结果相同时不更新；KL 的检查 |

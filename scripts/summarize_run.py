@@ -5,7 +5,8 @@
   -> reports/E0001a.md (for people) and reports/E0001a.json (for comparing runs)
 
 Every report has the same sections, so runs can be compared without reading logs. The script flags anomalies
-automatically (non-finite loss, no learning signal, large sampling/training mismatch, heavy clipping, truncated reasoning,
+automatically (non-finite loss, no learning signal, large sampling/training mismatch, heavy clipping, large updates
+(kl_old), truncated reasoning,
 incomplete run).
 Standard library only."""
 from __future__ import annotations
@@ -22,12 +23,13 @@ WINDOW = 10                               # batches averaged at the start and en
 TRAIN_KEYS = ("win_rate", "mean_return", "mean_bonus", "mixed_groups", "active_groups", "mean_length",
               "mean_forecast", "decisions", "reasoning_tokens", "rollout_s", "update_s",
               "gen_s", "score_s", "env_s", "prompt_s", "mean_reasoning_tokens", "reasoning_end_answer",
-              "reasoning_end_eos", "reasoning_end_cap", "mean_options")
+              "reasoning_end_eos", "reasoning_end_cap", "mean_options", "behavior_old_mean_abs_diff", "lr")
 SAMPLING_KEYS = ("sec_per_decision", "gen_s", "score_s", "env_s", "prompt_s", "mean_reasoning_tokens",
                  "reasoning_end_answer", "reasoning_end_eos", "reasoning_end_cap", "mean_options")
-PASS_KEYS = ("loss", "grad_norm", "clip_frac", "kl", "cal_loss")
+PASS_KEYS = ("loss", "grad_norm", "clip_frac", "kl", "cal_loss", "kl_old", "tis_mean_w", "tis_capped_frac")
 LOGP_DIFF_WARN = 0.05
 CLIP_WARN = 0.2
+KL_OLD_WARN = 0.1                         # mean last-pass KL(pi_old || pi_theta) per likelihood term
 CAP_WARN = 0.5                            # fraction of reasonings cut off at max_reasoning_tokens
 
 
@@ -106,6 +108,10 @@ def summarize(run_dir: Path, run_id: str, title: str) -> dict:
     clip = mean([r["passes"][-1].get("clip_frac") for r in train if r.get("passes")])
     if clip is not None and clip > CLIP_WARN:
         anomalies.append(f"mean last-pass clip fraction {clip:.2f} > {CLIP_WARN}")
+    kl_old = mean([r["passes"][-1].get("kl_old") for r in train if r.get("passes")])
+    if kl_old is not None and kl_old > KL_OLD_WARN:
+        anomalies.append(f"mean last-pass kl_old {kl_old:.3g} > {KL_OLD_WARN} (each batch moves the policy far from "
+                         "the one that sampled it)")
     cap = mean([r.get("reasoning_end_cap") for r in train])
     if cap is not None and cap > CAP_WARN:
         anomalies.append(f"training: {cap:.2f} of the reasonings hit max_reasoning_tokens (> {CAP_WARN})")

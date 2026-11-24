@@ -46,6 +46,12 @@ class GRPOConfig:
     weight_decay: float = 0.0
     grad_clip: float = 1.0
     parallel_episodes: int = 32           # episodes advanced in lockstep while sampling (training and evaluation)
+    # Truncated importance sampling: every policy term is weighted by min(exp(old - behavior), tis_cap), where
+    # behavior is the log-prob recorded while sampling and old the one recomputed by the training forward.
+    # None = off.
+    tis_cap: float | None = None
+    # Learning rate of batch b (from 1) is learning_rate * min(1, b / warmup_batches); 0 = no warmup.
+    warmup_batches: int = 0
 
     def __post_init__(self):
         if not 0.0 <= self.lam < 1.0:
@@ -56,6 +62,10 @@ class GRPOConfig:
             raise ValueError(f"normalization must be one of {NORMALIZATIONS}, got {self.normalization!r}")
         if self.parallel_episodes < 1:
             raise ValueError("parallel_episodes must be at least 1")
+        if self.tis_cap is not None and self.tis_cap <= 0:
+            raise ValueError("tis_cap must be positive (or None to turn truncated importance sampling off)")
+        if self.warmup_batches < 0:
+            raise ValueError("warmup_batches must be non-negative")
         if self.group_size < 2:
             raise ValueError("group_size must be at least 2 for group-relative advantages")
 
