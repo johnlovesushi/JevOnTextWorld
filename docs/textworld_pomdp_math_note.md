@@ -165,3 +165,91 @@ control problem.
 source conversation, not a claim about any proprietary RLCD training recipe.
 State-matching approaches to stepwise credit assignment must use the full underlying
 game state (and remaining horizon), not merely identical observation strings.
+
+## Addendum: cross-entropy calibration and Platt scaling
+
+*Added with T0005. The body above and the PDF are unchanged; equation numbers here carry
+the prefix A.*
+
+Write the forecast logit as $s_t = \ell_\theta(\text{yes}) - \ell_\theta(\text{no})$, so
+that (5) reads $p_t = \sigma(s_t)$.
+
+**A.1 Cross-entropy loss.** In place of the Brier loss in (9) one may use the binary
+cross-entropy (log loss) with the same per-decision weights,
+
+$$
+\mathcal{L}^{\text{CE}}_{\text{cal}} = \frac{\sum_{i,t} \mathrm{CE}(p^i_t, z^i)}{\sum_i T_i}, \qquad
+\mathrm{CE}(p, z) = -z \log p - (1 - z) \log(1 - p)
+= \log\big(1 + e^{s}\big) - z s , \tag{A1}
+$$
+
+where the last form, in terms of the logit, is the one evaluated numerically. The bonus
+$b_i$ in (6) is still the Brier bonus; only the trained loss changes.
+
+**A.2 Gradients of the two losses.** With $p = \sigma(s)$ and
+$\partial p / \partial s = p(1-p)$,
+
+$$
+\frac{\partial}{\partial s} (p - z)^2 = 2 (p - z)\, p (1 - p), \qquad
+\frac{\partial}{\partial s} \mathrm{CE}(p, z) = p - z. \tag{A2}
+$$
+
+The Brier gradient carries the extra factor $2p(1-p) \le \tfrac12$, which vanishes when
+the forecast saturates. For a confidently wrong forecast, $z = 0$ and $s \to +\infty$,
+the Brier gradient is $2p^2(1-p) \approx 2e^{-s} \to 0$ while the cross-entropy gradient
+tends to $1$: at $s = 12$ they are about $1.2 \times 10^{-5}$ and $1$. A forecast that
+starts saturated on the wrong side therefore receives almost no signal from the Brier
+loss, and a constant signal from cross-entropy. The price is that cross-entropy is
+unbounded, $\mathrm{CE} \approx |s|$ for confidently wrong forecasts, whereas
+$(p - z)^2 \le 1$; a few such decisions can dominate $\mathcal{L}^{\text{CE}}_{\text{cal}}$.
+
+**A.3 Proposition 1 under cross-entropy.** *For a fixed rollout policy
+$\theta_{\text{old}}$, the population minimizer of $\mathcal{L}^{\text{CE}}_{\text{cal}}$ is
+the same $p^*$ as in (10).*
+
+*Proof.* Condition on $(h, c, a)$ and let $q = \mathbb{P}_{\theta_{\text{old}}}(z = 1 \mid h, c, a)$.
+The conditional expected loss of a forecast $p$ is $-q \log p - (1-q) \log(1-p)$, whose
+derivative in $p$ is $(p - q) / \big(p(1-p)\big)$: negative for $p < q$, positive for
+$p > q$. The unique minimizer is $p = q$ (for $q \in \{0, 1\}$ it is attained at the
+boundary, i.e. as $s \to \pm\infty$). $\square$
+
+Both losses are strictly proper scoring rules, so they agree on the target and differ
+only in how deviations are penalized (A2). The interpretation of $p_t$ as the
+undiscounted success critic $Q^{\theta_{\text{old}}}_{\text{win}}$ is unchanged.
+
+**A.4 Platt scaling.** Two scalars $a, b$, which are not part of the language model,
+recalibrate the logit:
+
+$$
+p_t = \sigma(a\, s_t + b), \qquad a = 1,\ b = 0 \text{ recovering (5).} \tag{A3}
+$$
+
+Either calibration loss is then a function of $u_t = a s_t + b$, and by (A2) the
+cross-entropy gradients are
+
+$$
+\frac{\partial\, \mathrm{CE}}{\partial b} = p - z, \qquad
+\frac{\partial\, \mathrm{CE}}{\partial a} = (p - z)\, s, \qquad
+\frac{\partial\, \mathrm{CE}}{\partial s} = a\,(p - z). \tag{A4}
+$$
+
+Three remarks.
+
+1. *Ranking.* For $a > 0$ the map $s \mapsto \sigma(as + b)$ is increasing, so $(a, b)$
+   change calibration but not how decisions are ranked: the AUC of $p_t$ against $z$
+   equals that of $s_t$. Whether the forecast separates won from lost episodes is a
+   property of $s_t$, i.e. of the language model alone.
+2. *Initialization.* $b$ is set once, from the first batch, to
+   $b = \operatorname{logit}\big(\operatorname{clip}(\bar z, 0.05, 0.95)\big) - \bar s$,
+   where $\bar z$ is the decision-weighted win rate and $\bar s$ the mean logit over all
+   decisions of that batch. Then $\sigma(a \bar s + b) = \operatorname{clip}(\bar z, 0.05, 0.95)$:
+   the forecast at the mean logit starts at the base rate instead of wherever the
+   pretrained yes/no logits happen to sit, which removes the saturated start discussed
+   in A.2.
+3. *Where the gradient goes.* Calibration can be trained through $(a, b)$ only, by
+   treating $s_t$ as a constant in $\mathcal{L}_{\text{cal}}$ (drop the last gradient in
+   (A4)); the language model then receives gradients from $\mathcal{L}_{\text{GRPO}}$ and
+   $\mathcal{L}_{\text{KL}}$ only. In that case the population minimizer over the
+   two-parameter family is the best logistic fit of $z$ on $s$, not $p^*$ of (10):
+   Proposition 1 requires a forecast that is free to vary with $(h, c, a)$, which is the
+   case when $s_t$ is trained as well.

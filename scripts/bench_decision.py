@@ -88,8 +88,8 @@ def main() -> None:
 
         def with_grad():
             model.zero_grad(set_to_none=True)
-            logps, p = policy.score(d, forecast=forecast)
-            (logps.sum() + (p if p is not None else 0.0)).backward()
+            logps, s = policy.score(d, forecast=forecast)
+            (logps.sum() + (policy.forecast_prob(s) if s is not None else 0.0)).backward()
 
         row = {"n": n, "K": k, "c": c}
         try:

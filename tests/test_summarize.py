@@ -32,15 +32,19 @@ def test_smoke_run_report(tmp_path):
     assert summary["train_last"]["sec_per_decision"] > 0
     assert summary["train_last"]["sec_per_decision_with_update"] > summary["train_last"]["sec_per_decision"]
     assert summary["train_first"]["first_pass_kl_old"] == 0.0 and summary["train_last"]["last_pass_kl_old"] >= 0.0
+    assert summary["train_last"]["cal_loss"] > 0 and summary["train_last"]["mean_forecast_logit"] is not None
+    assert summary["cal_loss_kind"] == "brier"
     assert summary["train_last"]["lr"] > 0 and summary["train_last"]["behavior_old_mean_abs_diff"] is not None
     for row in summary["val"]:
-        assert abs(row["forecast_brier_const"] - row["win_rate"] * (1 - row["win_rate"])) < 1e-12
+        assert 0.0 <= row["forecast_brier_const"] <= 0.25       # decision-weighted since T0005 (tests/test_t0005.py)
+        assert {"forecast_auc", "forecast_auc_t0", "forecast_s_mean_win", "forecast_s_mean_lose"} <= set(row)
         assert row["sec_per_decision"] > 0 and row["mean_options"] >= 4
         assert row["reasoning_end_answer"] + row["reasoning_end_eos"] + row["reasoning_end_cap"] == 1
     # A random model never writes "Answer:", so nearly every reasoning runs into the token cap: the report says so.
     assert summary["anomalies"] and all("hit max_reasoning_tokens" in a for a in summary["anomalies"])
     md = (out / "T0001.md").read_text()
     assert "constant-forecast Brier" in md and "| last_pass_kl_old |" in md and "| first_pass_tis_mean_w | – | – |" in md
+    assert "| batch | AUC | AUC t0 | mean s (won) | mean s (lost) | mean s |" in md and "| cal_loss |" in md
     for section in ("## Anomalies", "## Validation", "Sampling during validation", "## Training", "## Log tail", "## Executor notes"):
         assert section in md
     assert "line 79" in md and "line 29" not in md and "Ran as specified." in md

@@ -54,7 +54,8 @@ def _assert_on_policy(policy, episodes):
     for ep in episodes:
         for d in ep.decisions:
             with torch.no_grad():
-                logps, p = policy.score(d, forecast=True)
+                logps, s = policy.score(d, forecast=True)
+            p = policy.forecast_prob(s)
             assert torch.allclose(logps, torch.tensor(d.behavior_logps), atol=1e-4)
             assert p.item() == pytest.approx(d.p, abs=1e-4)
 

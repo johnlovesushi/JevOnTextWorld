@@ -41,7 +41,8 @@ def test_sampling_and_scoring_agree(policy):
         assert d.command in obs.commands and d.n_terms == len(d.reasoning_ids) + 1 <= 7
         assert d.action_context_ids[-len(policy.answer_ids):] == policy.answer_ids
         with torch.no_grad():
-            logps, p = policy.score(d, forecast=True)
+            logps, s = policy.score(d, forecast=True)
+            p = policy.forecast_prob(s)
         assert torch.allclose(logps, torch.tensor(d.behavior_logps), atol=1e-4)
         assert 0.0 <= d.p <= 1.0 and p.item() == pytest.approx(d.p, abs=1e-5)
 
@@ -99,7 +100,8 @@ def test_decision_forward_matches_reference(policy, ending):
     """Shared-prefix scoring returns the same reasoning log-probs, l(a^j) and p_j as full-context forwards."""
     d = _manual_decision(policy, ending)
     with torch.no_grad():
-        lp, scores, p = policy.decision_forward(policy.model, d, forecast=True)
+        lp, scores, s = policy.decision_forward(policy.model, d, forecast=True)   # s: forecast logits (T0005)
+        p = policy.forecast_prob(s)
         _, scores_no_forecast, none = policy.decision_forward(policy.model, d, forecast=False)
         assert none is None and torch.allclose(scores, scores_no_forecast, atol=1e-5)   # appending z changes nothing
         assert lp.shape == (len(d.reasoning_ids),) and scores.shape == p.shape == (12,)
@@ -107,7 +109,8 @@ def test_decision_forward_matches_reference(policy, ending):
         assert torch.allclose(scores, ref_option_scores(policy, policy.model, d.action_context_ids, d.option_ids),
                               atol=1e-4)
         assert torch.allclose(p, ref_forecasts(policy, policy.model, d), atol=1e-4)
-        logps, p_a = policy.score(d, forecast=True)
+        logps, s_a = policy.score(d, forecast=True)
+        p_a = policy.forecast_prob(s_a)
         assert logps.shape == (d.n_terms,) and p_a.item() == pytest.approx(p[d.action].item())
         assert logps[-1].item() == pytest.approx(torch.log_softmax(scores, 0)[d.action].item(), abs=1e-6)
 
@@ -117,7 +120,8 @@ def test_decision_forward_gradient_matches_reference(policy, ending):
     d = _manual_decision(policy, ending)
     params = [w for w in policy.model.parameters() if w.requires_grad]
 
-    logps, p_a = policy.score(d, forecast=True)
+    logps, s_a = policy.score(d, forecast=True)
+    p_a = policy.forecast_prob(s_a)
     new = torch.autograd.grad(logps.sum() + p_a, params, allow_unused=True)
 
     log_q = torch.log_softmax(ref_option_scores(policy, policy.model, d.action_context_ids, d.option_ids), dim=0)
