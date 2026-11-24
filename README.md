@@ -68,6 +68,7 @@ python -m jevtw.train --config configs/grpo_calibrated.json --model Qwen/Qwen3-1
 （$w$ 是这次评测按决策加权的胜率），即“永远预测 $w$”的 Brier 分数，作为参照。
 评测行还有预测 logit $s$ 的诊断：`forecast_auc`、`forecast_auc_t0`、`forecast_s_mean_win`、`forecast_s_mean_lose`；
 加 `--save-forecasts` 会把每次评测中每一步的 $s$、$p$ 写到 `runs/<name>/forecasts/batchNNNN.jsonl`。
+加 `--save-reasonings` 会把每次评测中每个决策的推理文本写到 `runs/<name>/reasonings/batchNNNN.jsonl`；`scripts/sample_reasonings.py` 从中随机抽几段。
 只评测一个 checkpoint：`python -m jevtw.train --model runs/<name>/checkpoints/batchNNNN --val-games … --batches 0 --save-forecasts --out runs/<新目录>`。
 提示词格式（`prompt_format`：`plain` / `chat_nothink` / `chat_think`）、预测的读法（`forecast_format`）、交叉熵校准损失（`cal_loss`）和 Platt 缩放（`platt`）见 `docs/implementation.md`。
 

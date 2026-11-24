@@ -131,7 +131,7 @@ def summarize(run_dir: Path, run_id: str, title: str) -> dict:
     if not val:
         anomalies.append("no validation evaluation recorded")
 
-    peaks = [r.get("gpu_peak_gb") for r in train if r.get("gpu_peak_gb") is not None]
+    peaks = [r.get("gpu_peak_gb") for r in train + val if r.get("gpu_peak_gb") is not None]
     return {
         "id": run_id, "title": title, "run_dir": str(run_dir), "generated": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "meta": config.get("meta", {}), "args": config.get("args", {}),
@@ -197,6 +197,8 @@ def markdown(s: dict, log_tail: str | None, notes: str | None) -> str:
         lines += ["| " + " | ".join([str(v["batch"])] + [fmt(v.get(k)) for k in SAMPLING_KEYS]) + " |"
                   for v in s["val"]]
     first, last = s["train_first"], s["train_last"]
+    if not first and s["gpu_peak_gb"] is not None:        # evaluation only: the peak of the evaluations
+        lines += ["", f"- peak GPU memory (evaluation): {fmt(s['gpu_peak_gb'])} GiB"]
     if first:
         lines += ["", f"## Training (mean over the first and last {WINDOW} batches)", "",
                   f"| metric | first {first['batches']} | last {last['batches']} |", "|---|---|---|"]

@@ -27,7 +27,7 @@ from pathlib import Path
 import torch
 
 from .config import Config
-from .diagnostics import forecast_metrics, write_forecasts
+from .diagnostics import forecast_metrics, write_forecasts, write_reasonings
 from .envs import KeyChestEnv, TextWorldEnv
 from .policy import PLATT_FILE, LMPolicy
 from .rollout import collect_batch, rollout_metrics
@@ -70,17 +70,24 @@ def run_metadata(cfg: Config, args) -> dict:
 
 
 def evaluate(policy: LMPolicy, games, seeds, max_actions: int, parallel: int = 1,
-             forecasts_path: Path | None = None) -> dict:
+             forecasts_path: Path | None = None, reasonings_path: Path | None = None) -> dict:
     """One sampled episode per (game, seed). Reports the win rate, how well the forecast predicted z
-    (`diagnostics.forecast_metrics`) and sampling speed; writes every forecast to `forecasts_path` when given."""
+    (`diagnostics.forecast_metrics`), sampling speed and the peak GPU memory of the evaluation; writes every
+    forecast to `forecasts_path` and every reasoning (as text) to `reasonings_path` when given."""
     jobs = [(name, make_env, env_seed, s) for name, make_env, env_seed in games for s in seeds]
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
     stats, start = {}, time.time()
     episodes = collect_batch(policy, jobs, max_actions, parallel, stats)
     sampling = rollout_metrics(episodes, stats, time.time() - start, policy.eos_id)
+    peak = torch.cuda.max_memory_allocated() / 2 ** 30 if torch.cuda.is_available() else None
     if forecasts_path is not None:
         write_forecasts(forecasts_path, episodes)
+    if reasonings_path is not None:
+        write_reasonings(reasonings_path, episodes, policy.tokenizer.decode)
     return {"episodes": len(episodes), "win_rate": sum(ep.z for ep in episodes) / len(episodes),
             "mean_length": sum(ep.length for ep in episodes) / len(episodes),
+            "gpu_peak_gb": None if peak is None else round(peak, 2),
             **forecast_metrics(episodes), **sampling}
 
 
@@ -163,6 +170,8 @@ def main(argv=None):
     ap.add_argument("--save-forecasts", action="store_true",
                     help="every evaluation writes forecasts/batchNNNN.jsonl: one line per episode with s and p of "
                          "every step")
+    ap.add_argument("--save-reasonings", action="store_true",
+                    help="write the text of every reasoning of each evaluation to <out>/reasonings/batchNNNN.jsonl")
     ap.add_argument("--wandb-project", help="also log to this Weights & Biases project (off when not given)")
     ap.add_argument("--wandb-run-name", help="default: the name of the --out directory")
     ap.add_argument("--wandb-mode", choices=("online", "offline"), default="online",
@@ -224,7 +233,8 @@ def main(argv=None):
         if val_games:
             start = time.time()
             path = out / "forecasts" / f"batch{batch:04d}.jsonl" if args.save_forecasts else None
-            result = evaluate(policy, val_games, args.eval_seeds, g.max_actions, g.parallel_episodes, path)
+            texts = out / "reasonings" / f"batch{batch:04d}.jsonl" if args.save_reasonings else None
+            result = evaluate(policy, val_games, args.eval_seeds, g.max_actions, g.parallel_episodes, path, texts)
             log({"batch": batch, "split": "val", "eval_s": round(time.time() - start, 2), **result})
 
     try:
