@@ -13,6 +13,18 @@ from jevtw.testing import tiny_model
 from jevtw.trainer import Trainer, assign_returns
 
 
+def count_head_rows(monkeypatch) -> list[int]:
+    """Record how many hidden-state rows every call of the FP32 output layer (LMPolicy._head) projects."""
+    projected, original = [], LMPolicy._head
+
+    def spy(model, hidden, rows=None):
+        projected.append(hidden.shape[0])
+        return original(model, hidden, rows)
+
+    monkeypatch.setattr(LMPolicy, "_head", staticmethod(spy))
+    return projected
+
+
 def test_prompt_shows_window_and_numbered_options(policy_cfg):
     history = [(f"cmd{i}", f"obs{i}") for i in range(5)]
     text = build_prompt("Win.", history, Observation("here", ["open box", "wait"]), policy_cfg)
@@ -121,16 +133,14 @@ def test_decision_forward_gradient_matches_reference(policy, ending):
 
 
 @pytest.mark.parametrize("forecast", [True, False])
-def test_decision_forward_work_is_one_prefix_plus_suffixes(policy, forecast):
+def test_decision_forward_work_is_one_prefix_plus_suffixes(policy, forecast, monkeypatch):
     """Regression for the E0001 OOMs: the context is embedded once, and the output layer only sees the positions
     that are read (never the whole context)."""
     d = _manual_decision(policy, "cap")
     n, c, z = len(d.action_context_ids), len(d.reasoning_ids), len(policy.confidence_prompt_ids)
-    embedded, projected = [], []
+    embedded, projected = [], count_head_rows(monkeypatch)
     hooks = [policy.model.get_input_embeddings().register_forward_hook(
-                 lambda module, args, output: embedded.append(args[0].numel())),
-             policy.model.get_output_embeddings().register_forward_hook(
-                 lambda module, args, output: projected.append(output.numel() // output.shape[-1]))]
+                 lambda module, args, output: embedded.append(args[0].numel()))]
     try:
         with torch.no_grad():
             policy.decision_forward(policy.model, d, forecast=forecast)
@@ -139,7 +149,7 @@ def test_decision_forward_work_is_one_prefix_plus_suffixes(policy, forecast):
             h.remove()
     assert len(embedded) == 1                                  # one forward
     assert sum(embedded) == (n - 1) + sum(1 + len(o) + (z if forecast else 0) for o in d.option_ids)
-    assert sum(projected) <= c + sum(len(o) + (1 if forecast else 0) for o in d.option_ids)
+    assert projected == [c + sum(len(o) for o in d.option_ids)] + ([len(d.option_ids)] if forecast else [])
     assert sum(embedded) < len(d.option_ids) * n               # the old cost: one full context per option
 
 
@@ -156,17 +166,12 @@ def test_action_distribution_is_softmax_over_options(policy):
     assert torch.allclose(torch.tensor(d.p_options), forecasts, atol=1e-4)
 
 
-def test_sampling_prefill_projects_one_position_per_step(policy):
+def test_sampling_prefill_projects_one_position_per_step(policy, monkeypatch):
     """Sampling c_t never builds logits for the prompt positions: one output-layer row per sampled token, plus the
     rows of the single decision_forward call."""
     obs = Observation("a room", [f"cmd {i}" for i in range(5)])
-    projected = []
-    hook = policy.model.get_output_embeddings().register_forward_hook(
-        lambda module, args, output: projected.append(output.numel() // output.shape[-1]))
-    try:
-        d = policy.act("goal", [], obs, torch.Generator().manual_seed(2))
-    finally:
-        hook.remove()
+    projected = count_head_rows(monkeypatch)
+    d = policy.act("goal", [], obs, torch.Generator().manual_seed(2))
     c = len(d.reasoning_ids)
     assert d.command in obs.commands and len(d.option_ids) == 5
     assert sum(projected) == c + c + sum(len(o) + 1 for o in d.option_ids) < len(d.prompt_ids)

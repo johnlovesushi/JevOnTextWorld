@@ -58,6 +58,12 @@ def kl_k3(logp: torch.Tensor, ref_logp: torch.Tensor) -> torch.Tensor:
     return torch.exp(log_r) - log_r - 1.0
 
 
+def tis_weights(old_logp: torch.Tensor, behavior_logp: torch.Tensor, cap: float) -> torch.Tensor:
+    """Truncated importance weights min(pi_old / mu, cap) per term: mu is the probability the term was sampled
+    with, pi_old the one the training forward assigns to it under the same parameters."""
+    return torch.exp(old_logp - behavior_logp).clamp(max=cap)
+
+
 def brier(p: torch.Tensor, z: float) -> torch.Tensor:
     return (p - z) ** 2
 
@@ -65,15 +71,21 @@ def brier(p: torch.Tensor, z: float) -> torch.Tensor:
 def decision_loss(logps: torch.Tensor, old_logps: torch.Tensor, advantage: float, weight: float, eps: float, *,
                   ref_logps: torch.Tensor | None = None, beta: float = 0.0,
                   p: torch.Tensor | None = None, z: float | None = None, cal_weight: float = 0.0,
-                  alpha: float = 0.0) -> tuple[torch.Tensor, dict]:
+                  alpha: float = 0.0, tis_weights: torch.Tensor | None = None) -> tuple[torch.Tensor, dict]:
     """One decision's contribution to L. logps / old_logps / ref_logps: (|c_t| + 1,) FP32, the last entry being the
-    action. Returns the weighted scalar and unweighted diagnostics."""
+    action. `tis_weights` (same shape, constants) multiply the policy terms only, never the KL or the Brier term.
+    Returns the weighted scalar and unweighted diagnostics."""
     surrogate = clipped_surrogate(logps, old_logps, advantage, eps)
+    if tis_weights is not None:
+        surrogate = surrogate * tis_weights.detach()
     loss = weight * surrogate.sum()
     with torch.no_grad():
         ratio = torch.exp(logps - old_logps)
         stats = {"policy": float(loss.detach()),
-                 "clipped": int(((ratio < 1 - eps) | (ratio > 1 + eps)).sum()), "terms": int(logps.numel())}
+                 "clipped": int(((ratio < 1 - eps) | (ratio > 1 + eps)).sum()), "terms": int(logps.numel()),
+                 # k3 with r = pi_theta / pi_old: the terms were sampled from (about) pi_old, so the mean of this
+                 # over terms estimates KL(pi_old || pi_theta). Exactly 0 while theta = theta_old.
+                 "kl_old": float(kl_k3(old_logps, logps).sum())}
     if beta > 0:
         if ref_logps is None:
             raise ValueError("beta > 0 needs reference log-probabilities")

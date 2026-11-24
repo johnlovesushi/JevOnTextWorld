@@ -7,7 +7,8 @@ The games and sample seeds are drawn exactly as jevtw.train draws them for its f
 and are the same for every --parallel value. Prints one JSON line per value: seconds per decision, the time
 split, reasoning statistics, win rate and peak GPU memory.
 
---check-logps also re-scores every sampled decision with LMPolicy.score (the training forward, no gradients) and
+--check-logps also re-scores every sampled decision with LMPolicy.score (the training forward, no gradients,
+forecast = policy.cfg.forecast as in the trainer) and
 reports how far the log-probs recorded while sampling are from it, separately for reasoning tokens and actions.
 --dtype float32 tells numerical noise of bf16 apart from a real mismatch."""
 from __future__ import annotations
@@ -35,7 +36,9 @@ def logp_diff(policy, episodes) -> dict:
     reasoning, action = [], []
     for ep in episodes:
         for d in ep.decisions:
-            diff = (policy.score(d)[0].cpu() - torch.tensor(d.behavior_logps)).abs().tolist()
+            # The trainer's forward: the same sequence as the rollout (T0003).
+            logps = policy.score(d, forecast=policy.cfg.forecast)[0]
+            diff = (logps.cpu() - torch.tensor(d.behavior_logps)).abs().tolist()
             reasoning += diff[:-1]
             action.append(diff[-1])
 
