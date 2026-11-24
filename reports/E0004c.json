@@ -1,8 +1,8 @@
 {
  "id": "E0004c",
- "title": "Reasoning formats on L1 (eval only): chat_think, 512 reasoning tokens, win rate 0.0625",
+ "title": "Reasoning formats on L1 (eval only): chat_think, 512 reasoning tokens, feedback history, win rate 0.0625",
  "run_dir": "runs/E0004c",
- "generated": "2026-11-24T11:14:59-0500",
+ "generated": "2026-11-24T11:52:28-0500",
  "meta": {
   "commit": "5980d15f300446f4381755ead698d56e70859e2b",
   "dirty": false,

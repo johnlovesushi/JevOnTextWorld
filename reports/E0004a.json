@@ -1,8 +1,8 @@
 {
  "id": "E0004a",
- "title": "Reasoning formats on L1 (eval only): no reasoning (plain, 0), win rate 0.0125",
+ "title": "Reasoning formats on L1 (eval only): no reasoning (plain, 0), feedback history, win rate 0.0125",
  "run_dir": "runs/E0004a",
- "generated": "2026-11-24T11:14:58-0500",
+ "generated": "2026-11-24T11:52:27-0500",
  "meta": {
   "commit": "5980d15f300446f4381755ead698d56e70859e2b",
   "dirty": false,
