@@ -1,0 +1,79 @@
+{
+ "runs": {
+  "base": {
+   "episodes": 120,
+   "wins": 4,
+   "wilson95": [
+    0.0130375510983506,
+    0.082580337559106
+   ],
+   "seeds": [
+    101,
+    102,
+    103
+   ],
+   "win_rate": 0.03333333333333333,
+   "mean_length": 13.708333333333334,
+   "forecast_auc": 0.6389778036438883,
+   "forecast_auc_t0": 0.46875,
+   "forecast_brier": 0.9519519088064263,
+   "forecast_brier_const": 0.04571798117164475
+  }
+ },
+ "stats": {
+  "win_rate": {
+   "mean": 0.03333333333333333,
+   "std": null,
+   "n": 1
+  },
+  "mean_length": {
+   "mean": 13.708333333333334,
+   "std": null,
+   "n": 1
+  },
+  "forecast_auc": {
+   "mean": 0.6389778036438883,
+   "std": null,
+   "n": 1
+  },
+  "forecast_auc_t0": {
+   "mean": 0.46875,
+   "std": null,
+   "n": 1
+  },
+  "forecast_brier": {
+   "mean": 0.9519519088064263,
+   "std": null,
+   "n": 1
+  },
+  "forecast_brier_const": {
+   "mean": 0.04571798117164475,
+   "std": null,
+   "n": 1
+  }
+ },
+ "pooled": {
+  "wins": 4,
+  "episodes": 120,
+  "win_rate": 0.03333333333333333,
+  "wilson95": [
+   0.0130375510983506,
+   0.082580337559106
+  ]
+ },
+ "action_types": {
+  "examine": 456,
+  "take": 417,
+  "cook": 272,
+  "drop": 118,
+  "put": 117,
+  "prepare": 98,
+  "open": 76,
+  "close": 29,
+  "slice": 24,
+  "eat": 21,
+  "dice": 7,
+  "insert": 6,
+  "chop": 4
+ }
+}
