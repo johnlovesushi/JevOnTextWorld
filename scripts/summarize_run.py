@@ -8,6 +8,8 @@ Every report has the same sections, so runs can be compared without reading logs
 automatically (non-finite loss, no learning signal, large sampling/training mismatch, heavy clipping, large updates
 (kl_old), truncated reasoning,
 incomplete run).
+A run of `python -m jevtw.sft` is recognised by its training lines (they have `sft_loss` and no `passes`): the
+training section is then one row per epoch (sft_loss, train_acc, ...), and the GRPO-only checks are skipped.
 Standard library only."""
 from __future__ import annotations
 
@@ -35,6 +37,7 @@ LOGP_DIFF_WARN = 0.05
 CLIP_WARN = 0.2
 KL_OLD_WARN = 0.1                         # mean last-pass KL(pi_old || pi_theta) per likelihood term
 CAP_WARN = 0.5                            # fraction of reasonings cut off at max_reasoning_tokens
+SFT_KEYS = ("sft_loss", "train_acc", "decisions", "steps", "grad_norm", "max_grad_norm", "lr", "update_s")
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -90,7 +93,8 @@ def summarize(run_dir: Path, run_id: str, title: str) -> dict:
     rows = read_jsonl(run_dir / "metrics.jsonl")
     train = [r for r in rows if r.get("split") == "train"]
     val = [r for r in rows if r.get("split") == "val"]
-    planned = config.get("args", {}).get("batches")
+    sft = any("sft_loss" in r for r in train)             # written by jevtw.sft: one training line per epoch
+    planned = config.get("args", {}).get("epochs" if sft else "batches")
     anomalies = []
 
     for r in train:
@@ -99,9 +103,16 @@ def summarize(run_dir: Path, run_id: str, title: str) -> dict:
                 v = p.get(k)
                 if v is None or not math.isfinite(v):
                     anomalies.append(f"batch {r['batch']} pass {i}: {k} = {v}")
+    for r in train if sft else []:
+        for k in ("sft_loss", "grad_norm"):
+            v = r.get(k)
+            if v is None or not math.isfinite(v):
+                anomalies.append(f"epoch {r['batch']}: {k} = {v}")
     if planned and len(train) < planned:
-        anomalies.append(f"incomplete: {len(train)} of {planned} batches")
-    if train and all(r.get("active_groups", 0) == 0 for r in train):
+        anomalies.append(f"incomplete: {len(train)} of {planned} {'epochs' if sft else 'batches'}")
+    if sft:
+        pass                              # no groups, no advantages
+    elif train and all(r.get("active_groups", 0) == 0 for r in train):
         anomalies.append("no group ever had a non-zero advantage: no learning signal")
     elif train and config.get("grpo", {}).get("lam", 0) == 0 and all(r.get("mixed_groups", 0) == 0 for r in train):
         anomalies.append("no group ever mixed wins and losses (lam = 0): only KL / calibration gradients")
@@ -143,8 +154,10 @@ def summarize(run_dir: Path, run_id: str, title: str) -> dict:
                                        "mean_length") + FORECAST_KEYS + (
                                        "episodes", "eval_s") + SAMPLING_KEYS} for r in val],
         "cal_loss_kind": train[-1].get("cal_loss_kind") if train else None,
-        "train_first": window_stats(train[:WINDOW]) if train else None,
-        "train_last": window_stats(train[-WINDOW:]) if train else None,
+        "sft": [{"epoch": r["batch"], **{k: r.get(k) for k in SFT_KEYS}} for r in train] if sft else None,
+        "sft_setup": config.get("sft"),
+        "train_first": window_stats(train[:WINDOW]) if train and not sft else None,
+        "train_last": window_stats(train[-WINDOW:]) if train and not sft else None,
         "gpu_peak_gb": max(peaks) if peaks else None,
         "max_sampling_vs_old_logp_diff": max(diffs) if diffs else None,
         "anomalies": anomalies,
@@ -167,7 +180,8 @@ def markdown(s: dict, log_tail: str | None, notes: str | None) -> str:
              f"torch {m.get('torch')}, transformers {m.get('transformers')}",
              f"- started: {m.get('started')}; report generated: {s['generated']}",
              f"- run dir: `{s['run_dir']}`",
-             f"- progress: {s['progress']['batches_done']} / {s['progress']['batches_planned']} batches",
+             f"- progress: {s['progress']['batches_done']} / {s['progress']['batches_planned']} "
+             f"{'epochs (SFT)' if s.get('sft') else 'batches'}",
              f"- model: `{s['args'].get('model')}`, seed {s['args'].get('seed')}, "
              f"eval seeds {s['args'].get('eval_seeds')}",
              "", "## Configuration (non-default values)", "", "```json",
@@ -197,7 +211,20 @@ def markdown(s: dict, log_tail: str | None, notes: str | None) -> str:
         lines += ["| " + " | ".join([str(v["batch"])] + [fmt(v.get(k)) for k in SAMPLING_KEYS]) + " |"
                   for v in s["val"]]
     first, last = s["train_first"], s["train_last"]
-    if not first and s["gpu_peak_gb"] is not None:        # evaluation only: the peak of the evaluations
+    if s.get("sft"):
+        setup = s.get("sft_setup") or {}
+        lines += ["", "## Training (SFT, one row per epoch)", "",
+                  f"- {fmt(setup.get('states'))} expert states from {fmt(setup.get('games'))} games; "
+                  f"{fmt(setup.get('steps_per_epoch'))} optimizer steps per epoch, {fmt(setup.get('total_steps'))} in "
+                  f"all, linear warmup over the first {fmt(setup.get('warmup_steps'))}",
+                  f"- lr {fmt(s['args'].get('lr'))}, {fmt(s['args'].get('batch_decisions'))} states per step, "
+                  f"weight decay {fmt(s['args'].get('weight_decay'))}; train data `{s['args'].get('train_data')}`",
+                  "- sft_loss = mean -log q(a*) and train_acc = share of states whose most likely option is a*, "
+                  "both over the states as they were visited during the epoch (the model changes meanwhile)", "",
+                  "| epoch | " + " | ".join(SFT_KEYS) + " |", "|---|" + "---|" * len(SFT_KEYS)]
+        lines += ["| " + " | ".join([str(r["epoch"])] + [fmt(r.get(k)) for k in SFT_KEYS]) + " |" for r in s["sft"]]
+        lines += ["", f"- peak GPU memory: {fmt(s['gpu_peak_gb'])} GiB"]
+    elif not first and s["gpu_peak_gb"] is not None:      # evaluation only: the peak of the evaluations
         lines += ["", f"- peak GPU memory (evaluation): {fmt(s['gpu_peak_gb'])} GiB"]
     if first:
         lines += ["", f"## Training (mean over the first and last {WINDOW} batches)", "",
