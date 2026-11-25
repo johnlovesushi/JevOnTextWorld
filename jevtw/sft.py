@@ -20,6 +20,10 @@ Outputs in --out: config.json, metrics.jsonl (per epoch one train line with sft_
 the states as they were visited, and one val line from `train.evaluate`), checkpoints/epochNN/ (model and
 tokenizer; a directory that `jevtw.train --model` and scripts/final_eval.py load).
 
+Several GPUs (T0009): `torchrun --standalone --nproc-per-node=2 -m jevtw.sft ...`. Every process builds the same
+steps (same seed); the states of a step are split by token count, the gradients summed, then every process clips and
+steps the same way. Evaluations are split by episodes. Only process 0 writes.
+
 Limitation: the data holds only states the expert visits. A policy trained on it has never seen the states that
 its own mistakes lead to, so errors compound during a rollout; the training accuracy is an upper bound on nothing
 about the win rate."""
@@ -35,6 +39,7 @@ from pathlib import Path
 
 import torch
 
+from . import dist as dist_mod
 from .config import Config
 from .envs import KeyChestEnv, Observation
 from .policy import Decision, LMPolicy
@@ -105,8 +110,9 @@ def lr_factor(step: int, warmup: int) -> float:
 
 class SFTTrainer:
     def __init__(self, policy: LMPolicy, lr: float, weight_decay: float, grad_clip: float, total_steps: int,
-                 warmup_frac: float):
+                 warmup_frac: float, dist: dist_mod.Dist | None = None):
         self.policy, self.lr, self.grad_clip = policy, lr, grad_clip
+        self.dist = dist if dist is not None else dist_mod.Dist()
         self.params = [p for p in policy.model.parameters() if p.requires_grad]
         self.optimizer = torch.optim.AdamW(self.params, lr=lr, weight_decay=weight_decay)
         self.warmup = warmup_steps(total_steps, warmup_frac)
@@ -119,11 +125,19 @@ class SFTTrainer:
             group["lr"] = self.lr * factor
         self.optimizer.zero_grad(set_to_none=True)
         total, correct = 0.0, 0
-        for d in decisions:
+        owner = dist_mod.balance([len(d.action_context_ids) + sum(len(o) for o in d.option_ids) for d in decisions],
+                                 self.dist.world)
+        for d, r in zip(decisions, owner):
+            if r != self.dist.rank:
+                continue
             loss, hit = sft_loss(self.policy, d)
             (loss / len(decisions)).backward()
             total += float(loss.detach())
             correct += hit
+        if self.dist.enabled:
+            self.dist.all_reduce_grads(self.params)
+            total, correct = self.dist.sum_floats([total, correct])
+            correct = int(correct)
         grad_norm = float(torch.nn.utils.clip_grad_norm_(self.params, self.grad_clip))
         if math.isfinite(grad_norm):
             self.optimizer.step()
@@ -162,6 +176,14 @@ def main(argv=None):
     ap.add_argument("--no-save", action="store_true", help="do not write checkpoints")
     ap.add_argument("--smoke", action="store_true", help="tiny random model on the KeyChest expert, CPU")
     args = ap.parse_args(argv)
+    dist = dist_mod.setup()
+    try:
+        _run(ap, args, dist)
+    finally:
+        dist_mod.teardown()
+
+
+def _run(ap, args, dist: dist_mod.Dist):
     if args.batch_decisions < 1 or args.epochs < 0 or not 0.0 <= args.warmup_frac <= 1.0:
         ap.error("need --batch-decisions >= 1, --epochs >= 0 and 0 <= --warmup-frac <= 1")
 
@@ -192,15 +214,21 @@ def main(argv=None):
 
     steps_per_epoch = math.ceil(len(rows) / args.batch_decisions)
     total_steps = steps_per_epoch * args.epochs
-    out.mkdir(parents=True, exist_ok=True)
+    if dist.main:
+        out.mkdir(parents=True, exist_ok=True)
     run_config = run_metadata(cfg, args)
+    run_config["meta"]["world_size"] = dist.world
     run_config["sft"] = {"states": len(rows), "games": len({r["game"] for r in rows}),
                          "steps_per_epoch": steps_per_epoch, "total_steps": total_steps,
                          "warmup_steps": warmup_steps(total_steps, args.warmup_frac)}
-    (out / "config.json").write_text(json.dumps(run_config, indent=2))
-    metrics_file = (out / "metrics.jsonl").open("a")
+    metrics_file = None
+    if dist.main:
+        (out / "config.json").write_text(json.dumps(run_config, indent=2))
+        metrics_file = (out / "metrics.jsonl").open("a")
 
     def log(record):
+        if not dist.main:
+            return
         metrics_file.write(json.dumps(record) + "\n")
         metrics_file.flush()
         print(json.dumps(record), flush=True)
@@ -208,7 +236,8 @@ def main(argv=None):
     torch.manual_seed(args.seed)
     rng = random.Random(args.seed)
     policy = LMPolicy(model, tokenizer, cfg.policy)
-    trainer = SFTTrainer(policy, args.lr, args.weight_decay, cfg.grpo.grad_clip, total_steps, args.warmup_frac)
+    trainer = SFTTrainer(policy, args.lr, args.weight_decay, cfg.grpo.grad_clip, total_steps, args.warmup_frac,
+                         dist=dist)
     g = cfg.grpo
     for epoch in range(1, args.epochs + 1):
         if torch.cuda.is_available():
@@ -231,11 +260,13 @@ def main(argv=None):
              "update_s": round(time.time() - start, 2), "gpu_peak_gb": None if peak is None else round(peak, 2)})
         if val_games:
             start = time.time()
-            result = evaluate(policy, val_games, args.eval_seeds, g.max_actions, g.parallel_episodes)
+            result = evaluate(policy, val_games, args.eval_seeds, g.max_actions, g.parallel_episodes, dist=dist)
             log({"batch": epoch, "epoch": epoch, "split": "val", "eval_s": round(time.time() - start, 2), **result})
-        if not args.no_save:
+        if not args.no_save and dist.main:
             save_checkpoint(out / "checkpoints" / f"epoch{epoch:02d}", model, tokenizer)
-    metrics_file.close()
+        dist.barrier()
+    if metrics_file is not None:
+        metrics_file.close()
 
 
 if __name__ == "__main__":

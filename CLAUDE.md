@@ -88,8 +88,8 @@
   sbatch --job-name=<ID> scripts/slurm/train.sbatch configs/experiments/<ID>.json runs/<ID> \
       --model Qwen/Qwen3-1.7B --train-games data/games/train --val-games data/games/valid [其余 jevtw.train 参数]
   ```
-  日志在 `runs/slurm/<作业名>-<jobid>.out`。脚本默认单卡、8 核、48 GB、3 小时；要改就在 `sbatch` 命令行上
-  加 `--time` 等参数。输出目录已存在时脚本会直接退出，不会覆盖。
+  日志在 `runs/slurm/<作业名>-<jobid>.out`。`train`/`sft`/`final_eval` 脚本默认双卡（T0009，torchrun，进程数 = 分到的 GPU 数）、16 核、96 GB、3 小时；
+  要改就在 `sbatch` 命令行上加 `--time`、`--gres=gpu:l40s:1` 等参数。输出目录已存在时脚本会直接退出，不会覆盖。
 - **登录节点上的注意事项**：
   - 跑 CPU 测试时设 `OMP_NUM_THREADS=4`，否则 torch 会按整台机器的核数开线程，非常慢。
   - `gh` 装在 `~/.local/bin`；它偶尔会因为创建线程失败而崩溃，前面加 `GOMAXPROCS=2` 即可。

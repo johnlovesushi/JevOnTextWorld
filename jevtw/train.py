@@ -12,7 +12,11 @@
 
 Outputs in --out: config.json, metrics.jsonl (one line per batch / evaluation), checkpoints/batchNNNN/ (model,
 tokenizer and, with Platt scaling, platt.json), and with --save-forecasts forecasts/batchNNNN.jsonl.
-With --wandb-project the same lines also go to Weights & Biases (optional; wandb is only imported then)."""
+With --wandb-project the same lines also go to Weights & Biases (optional; wandb is only imported then).
+
+Several GPUs of one node (T0009): start the same command with `torchrun --standalone --nproc-per-node=2 -m
+jevtw.train ...`. The games of a batch and the episodes of an evaluation are split over the processes and gathered;
+the update is split by decisions (`jevtw.dist`, `trainer.Trainer`). Only process 0 writes logs and checkpoints."""
 from __future__ import annotations
 
 import argparse
@@ -27,6 +31,7 @@ from pathlib import Path
 import torch
 
 from .config import Config
+from . import dist as dist_mod
 from .diagnostics import forecast_metrics, write_forecasts, write_reasonings
 from .envs import KeyChestEnv, TextWorldEnv
 from .policy import PLATT_FILE, LMPolicy
@@ -70,20 +75,24 @@ def run_metadata(cfg: Config, args) -> dict:
 
 
 def evaluate(policy: LMPolicy, games, seeds, max_actions: int, parallel: int = 1,
-             forecasts_path: Path | None = None, reasonings_path: Path | None = None) -> dict:
+             forecasts_path: Path | None = None, reasonings_path: Path | None = None,
+             dist: dist_mod.Dist | None = None) -> dict:
     """One sampled episode per (game, seed). Reports the win rate, how well the forecast predicted z
     (`diagnostics.forecast_metrics`), sampling speed and the peak GPU memory of the evaluation; writes every
-    forecast to `forecasts_path` and every reasoning (as text) to `reasonings_path` when given."""
+    forecast to `forecasts_path` and every reasoning (as text) to `reasonings_path` when given.
+    With several processes (`dist`) the episodes are split over them and gathered; every process returns the same
+    metrics (timings and memory are its own), and only process 0 writes the files."""
+    dist = dist if dist is not None else dist_mod.current()
     jobs = [(name, make_env, env_seed, s) for name, make_env, env_seed in games for s in seeds]
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
     stats, start = {}, time.time()
-    episodes = collect_batch(policy, jobs, max_actions, parallel, stats)
+    episodes = dist.run_split(jobs, lambda part: collect_batch(policy, part, max_actions, parallel, stats))
     sampling = rollout_metrics(episodes, stats, time.time() - start, policy.eos_id)
     peak = torch.cuda.max_memory_allocated() / 2 ** 30 if torch.cuda.is_available() else None
-    if forecasts_path is not None:
+    if forecasts_path is not None and dist.main:
         write_forecasts(forecasts_path, episodes)
-    if reasonings_path is not None:
+    if reasonings_path is not None and dist.main:
         write_reasonings(reasonings_path, episodes, policy.tokenizer.decode)
     return {"episodes": len(episodes), "win_rate": sum(ep.z for ep in episodes) / len(episodes),
             "mean_length": sum(ep.length for ep in episodes) / len(episodes),
@@ -177,7 +186,14 @@ def main(argv=None):
     ap.add_argument("--wandb-mode", choices=("online", "offline"), default="online",
                     help="online falls back to offline when wandb.init fails")
     args = ap.parse_args(argv)
+    dist = dist_mod.setup()
+    try:
+        _run(args, dist)
+    finally:
+        dist_mod.teardown()
 
+
+def _run(args, dist: dist_mod.Dist):
     cfg = Config.load(args.config) if args.config else Config()
     if args.smoke:
         cfg.policy.max_reasoning_tokens = min(cfg.policy.max_reasoning_tokens, 8)
@@ -195,23 +211,27 @@ def main(argv=None):
         train_games, val_games = keychest_games(range(8)), keychest_games(range(100, 104))
     else:
         if not args.train_games and args.batches > 0:
-            ap.error("--train-games is required unless --smoke or --batches 0")
+            raise SystemExit("--train-games is required unless --smoke or --batches 0")
         train_games = textworld_games(args.train_games) if args.train_games else []
         val_games = textworld_games(args.val_games) if args.val_games else []
     if args.val_limit is not None:
         val_games = val_games[:args.val_limit]
 
     out = Path(args.out)
-    out.mkdir(parents=True, exist_ok=True)
     run_config = run_metadata(cfg, args)
-    (out / "config.json").write_text(json.dumps(run_config, indent=2))
-    metrics_file = (out / "metrics.jsonl").open("a")
-    wandb_run = None
-    if args.wandb_project:
+    run_config["meta"]["world_size"] = dist.world
+    metrics_file = wandb_run = None
+    if dist.main:
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "config.json").write_text(json.dumps(run_config, indent=2))
+        metrics_file = (out / "metrics.jsonl").open("a")
+    if args.wandb_project and dist.main:
         wandb_run = start_wandb(args.wandb_project, args.wandb_run_name or out.resolve().name, args.wandb_mode,
                                 run_config, out)
 
     def log(record):
+        if not dist.main:
+            return
         metrics_file.write(json.dumps(record) + "\n")
         metrics_file.flush()
         print(json.dumps(record), flush=True)
@@ -226,7 +246,7 @@ def main(argv=None):
     policy = LMPolicy(model, tokenizer, cfg.policy)
     if policy.load_platt(args.model):
         print(f"loaded Platt parameters a = {float(policy.platt_a):.6g}, b = {float(policy.platt_b):.6g}", flush=True)
-    trainer = Trainer(policy, cfg.grpo, reference_model=reference)
+    trainer = Trainer(policy, cfg.grpo, reference_model=reference, dist=dist)
     g = cfg.grpo
 
     def run_eval(batch):
@@ -234,7 +254,8 @@ def main(argv=None):
             start = time.time()
             path = out / "forecasts" / f"batch{batch:04d}.jsonl" if args.save_forecasts else None
             texts = out / "reasonings" / f"batch{batch:04d}.jsonl" if args.save_reasonings else None
-            result = evaluate(policy, val_games, args.eval_seeds, g.max_actions, g.parallel_episodes, path, texts)
+            result = evaluate(policy, val_games, args.eval_seeds, g.max_actions, g.parallel_episodes, path, texts,
+                              dist=dist)
             log({"batch": batch, "split": "val", "eval_s": round(time.time() - start, 2), **result})
 
     try:
@@ -243,12 +264,18 @@ def main(argv=None):
             if torch.cuda.is_available():
                 torch.cuda.reset_peak_memory_stats()
             start = time.time()
-            jobs = []
+            game_jobs = []                # one list of G jobs per game; the games are split over the processes
             for name, make_env, env_seed in (rng.choice(train_games) for _ in range(g.games_per_batch)):
-                jobs += [(name, make_env, env_seed, rng.randrange(2 ** 31)) for _ in range(g.group_size)]
+                game_jobs.append([(name, make_env, env_seed, rng.randrange(2 ** 31)) for _ in range(g.group_size)])
             stats = {}
-            episodes = collect_batch(policy, jobs, g.max_actions, g.parallel_episodes, stats)
-            groups = [episodes[i:i + g.group_size] for i in range(0, len(episodes), g.group_size)]
+
+            def play(parts):
+                episodes = collect_batch(policy, [job for part in parts for job in part], g.max_actions,
+                                         g.parallel_episodes, stats)
+                return [episodes[k:k + g.group_size] for k in range(0, len(episodes), g.group_size)]
+
+            groups = dist.run_split(game_jobs, play)
+            episodes = [ep for group in groups for ep in group]
             rollout_time = time.time() - start
             metrics = trainer.step(groups)
             peak = torch.cuda.max_memory_allocated() / 2 ** 30 if torch.cuda.is_available() else None
@@ -259,12 +286,14 @@ def main(argv=None):
                  **rollout_metrics(episodes, stats, rollout_time, policy.eos_id), **metrics})
             if batch % args.eval_every == 0 or batch == args.batches:
                 run_eval(batch)
-                if not args.no_save:
+                if not args.no_save and dist.main:
                     save_checkpoint(out / "checkpoints" / f"batch{batch:04d}", model, tokenizer, policy)
+                dist.barrier()
     finally:
         if wandb_run is not None:
             wandb_run.finish()
-    metrics_file.close()
+    if metrics_file is not None:
+        metrics_file.close()
 
 
 if __name__ == "__main__":

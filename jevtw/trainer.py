@@ -13,7 +13,12 @@
 Calibration (T0005): L_cal is the Brier score or the cross-entropy (`cal_loss`) of p = sigmoid(a s + b), where s is
 the forecast logit and a, b exist only with Platt scaling (`PolicyConfig.platt`; otherwise p = sigmoid(s)). a and b
 form their own parameter group (lr `platt_lr`, no weight decay, no warmup, not part of the gradient clipping);
-before the first update b is set from the first batch. `cal_grad = "platt_only"` detaches s in L_cal."""
+before the first update b is set from the first batch. `cal_grad = "platt_only"` detaches s in L_cal.
+
+Data parallelism (T0009, `jevtw.dist`): every process gets the whole batch (gathered after sampling), computes the
+returns, advantages, Platt start and weights from it, and owns a share of the active decisions (`dist.balance` by
+token count). Steps 2 and 3 run on the own decisions only; the gradients are summed over the processes before the
+clipping and the step, and the logged sums (loss, clipped terms, KL, ...) are summed too."""
 from __future__ import annotations
 
 import math
@@ -22,6 +27,7 @@ from typing import Sequence
 import torch
 
 from .config import GRPOConfig
+from .dist import Dist, balance
 from .losses import calibration_loss, calibration_weights, decision_loss, policy_weights, tis_weights
 from .policy import LMPolicy
 from .rewards import brier_bonus, episode_return, group_advantages
@@ -44,12 +50,14 @@ def assign_returns(groups: Sequence[Sequence[Episode]], cfg: GRPOConfig) -> None
 
 
 class Trainer:
-    def __init__(self, policy: LMPolicy, cfg: GRPOConfig, reference_model=None, optimizer=None):
+    def __init__(self, policy: LMPolicy, cfg: GRPOConfig, reference_model=None, optimizer=None,
+                 dist: Dist | None = None):
         if cfg.beta > 0 and reference_model is None:
             raise ValueError("beta > 0 needs a frozen reference model")
         if cfg.cal_grad == "platt_only" and not policy.cfg.platt:
             raise ValueError('cal_grad = "platt_only" needs Platt scaling (PolicyConfig.platt = True)')
         self.policy, self.cfg, self.reference = policy, cfg, reference_model
+        self.dist = dist if dist is not None else Dist()
         params = [p for p in policy.model.parameters() if p.requires_grad]
         if optimizer is None:
             if policy.cfg.platt:
@@ -75,15 +83,28 @@ class Trainer:
     def _active(self, ep: Episode) -> bool:
         return ep.advantage != 0 or self.cfg.alpha > 0 or self.cfg.beta > 0
 
+    def _owners(self, groups) -> dict:
+        """(g, i, t) -> process that scores this decision, for the decisions of active episodes. Cost = tokens of
+        the folded forward (action context + options)."""
+        keys = [(g, i, t) for g, group in enumerate(groups) for i, ep in enumerate(group) if self._active(ep)
+                for t in range(len(ep.decisions))]
+        costs = []
+        for g, i, t in keys:
+            d = groups[g][i].decisions[t]
+            costs.append(len(d.action_context_ids) + sum(len(o) for o in d.option_ids))
+        return dict(zip(keys, balance(costs, self.dist.world)))
+
     @torch.no_grad()
-    def _fix_old(self, groups):
+    def _fix_old(self, groups, owner):
         forecast = self.policy.cfg.forecast
         max_diff, sum_diff, terms = 0.0, 0.0, 0
-        for group in groups:
-            for ep in group:
+        for g, group in enumerate(groups):
+            for i, ep in enumerate(group):
                 if not self._active(ep):
                     continue
-                for d in ep.decisions:
+                for t, d in enumerate(ep.decisions):
+                    if owner[(g, i, t)] != self.dist.rank:
+                        continue
                     old, _ = self.policy.score(d, forecast=forecast)
                     d.old_logps = old.tolist()
                     diffs = [abs(a - b) for a, b in zip(d.old_logps, d.behavior_logps)]
@@ -91,6 +112,8 @@ class Trainer:
                     if self.cfg.beta > 0:
                         ref, _ = self.policy.score(d, model=self.reference, forecast=forecast)
                         d.ref_logps = ref.tolist()
+        (max_diff,) = self.dist.max_floats([max_diff])
+        sum_diff, terms = self.dist.sum_floats([sum_diff, terms])
         return max_diff, (sum_diff / terms if terms else 0.0)
 
     def _init_platt(self, groups) -> None:
@@ -136,7 +159,8 @@ class Trainer:
         w_cal = calibration_weights(counts)
         rollout_cal = self._rollout_cal_loss(groups, w_cal)
         platt_start = [float(v) for v in self.policy.platt_parameters()]
-        max_diff, mean_diff = self._fix_old(groups)
+        owner = self._owners(groups)
+        max_diff, mean_diff = self._fix_old(groups, owner)
         lr_factor = self._set_learning_rate()
         device = self.policy.device
         forecast = self.policy.cfg.forecast
@@ -151,6 +175,8 @@ class Trainer:
                     if not self._active(ep):
                         continue
                     for t, d in enumerate(ep.decisions):
+                        if owner[(g, i, t)] != self.dist.rank:
+                            continue
                         # Same sequence as the rollout and as _fix_old; the forecast enters the loss only when
                         # alpha > 0.
                         logps, s = self.policy.score(d, forecast=forecast)
@@ -178,6 +204,12 @@ class Trainer:
                         kl += stats.get("kl", 0.0) * w_pol[g][i][t]
                         cal += stats.get("cal", 0.0) * w_cal[g][i][t]
                         kl_old += stats["kl_old"]
+            if self.dist.enabled:
+                self.dist.all_reduce_grads([q for q in self.policy.model.parameters() if q.requires_grad]
+                                           + self.policy.platt_parameters())
+                total, clipped, terms, kl, cal, kl_old, tis_sum, tis_capped = self.dist.sum_floats(
+                    [total, clipped, terms, kl, cal, kl_old, tis_sum, tis_capped])
+                clipped, terms, tis_capped = int(clipped), int(terms), int(tis_capped)
             params = [q for q in self.policy.model.parameters() if q.grad is not None]
             grad_norm = float(torch.nn.utils.clip_grad_norm_(params, cfg.grad_clip)) if params else 0.0
             if params and math.isfinite(grad_norm):
