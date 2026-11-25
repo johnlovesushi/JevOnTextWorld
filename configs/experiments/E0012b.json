@@ -1,0 +1,7 @@
+{"policy": {"max_reasoning_tokens": 0, "history_window": 8, "forecast": false, "history_mode": "full",
+            "platt": false, "prompt_format": "plain", "confidence_mode": "verbal", "confidence_bins": 11,
+            "verbal_prompt": "\nConfidence (0-100) that you will complete the objective:"},
+ "grpo": {"games_per_batch": 4, "group_size": 8, "max_actions": 30, "lam": 0.3, "alpha": 0.0, "beta": 0.04,
+          "clip_eps": 0.2, "normalization": "token", "optimization_passes": 2, "learning_rate": 2e-6,
+          "grad_clip": 1.0, "parallel_episodes": 32, "warmup_batches": 5, "adv_norm": "mean",
+          "conf_advantage": "shared", "conf_coef": 1.0}}
