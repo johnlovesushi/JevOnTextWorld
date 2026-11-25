@@ -30,11 +30,14 @@ jevtw/
   rollout.py     Episode、collect_batch（多条轨迹同步推进）、run_episode（逐条执行的参考实现）
   trainer.py     一次 GRPO 更新
   train.py       训练循环与评测（含 --smoke CPU 冒烟）
+  sft.py         在专家状态上做监督微调（动作交叉熵；含 --smoke），输出的 checkpoint 可作为 RL 的起点
   testing.py     字节分词器 + 随机小模型（测试用，不需要下载）
 configs/         grpo.json（λ=α=0）、grpo_calibrated.json（λ=0.3, α=0.1）、grpo_feedback.json（grpo.json + history_mode=feedback）
   experiments/   每个实验一份配置：<ID>.json
 scripts/         make_games.py：用 tw-make 生成 cooking 游戏
                  summarize_run.py：把一次运行整理成固定格式的报告
+                 build_sft_data.py：沿通关路线生成 SFT 数据（CPU）
+                 final_eval.py：在测试集上用固定种子 101/102/103 做最终评测；aggregate_final.py：合并多个训练种子的结果
                  prompt_tokens.py：按通关路线统计两种 history_mode 下提示词的 token 数（CPU）
                  check_prompt_formats.py：核对对话格式提示词和官方模板（CPU）；加 --sample 用模型采样若干决策（GPU）
 reports/         实验报告 <ID>.md / <ID>.json
@@ -70,6 +73,8 @@ python -m jevtw.train --config configs/grpo_calibrated.json --model Qwen/Qwen3-1
 加 `--save-forecasts` 会把每次评测中每一步的 $s$、$p$ 写到 `runs/<name>/forecasts/batchNNNN.jsonl`。
 加 `--save-reasonings` 会把每次评测中每个决策的推理文本写到 `runs/<name>/reasonings/batchNNNN.jsonl`；`scripts/sample_reasonings.py` 从中随机抽几段。
 只评测一个 checkpoint：`python -m jevtw.train --model runs/<name>/checkpoints/batchNNNN --val-games … --batches 0 --save-forecasts --out runs/<新目录>`。
+监督微调：`python scripts/build_sft_data.py --games data/games_<难度>/train --out data/sft/<名字>.jsonl`，然后 `python -m jevtw.sft --config … --train-data data/sft/<名字>.jsonl --val-games … --out runs/<name>`（每个 epoch 评测一次并保存 `checkpoints/epochNN`）；从它开始 RL：`python -m jevtw.train --model runs/<name>/checkpoints/epochNN --tokenizer Qwen/Qwen3-1.7B …`。
+最终评测（只在 issue 要求时）：`python scripts/final_eval.py --config … --model … --games data/games_<难度>/test --out runs/<ID>/final_test`，多个训练种子用 `scripts/aggregate_final.py` 合并。
 提示词格式（`prompt_format`：`plain` / `chat_nothink` / `chat_think`）、预测的读法（`forecast_format`）、交叉熵校准损失（`cal_loss`）和 Platt 缩放（`platt`）见 `docs/implementation.md`。
 
 > 当前状态：CPU 测试和冒烟测试都通过了；还没有在 GPU 上用真实模型训练过。

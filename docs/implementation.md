@@ -221,6 +221,52 @@ token。这正是 `decision_forward` 在前缀里给推理 token 打分所需要
 让 $z$ 成为唯一的成功信号。两者都可以在 `TextWorldEnv` 中关闭。TextWorld 的游戏是确定性的，
 所以 `env_seed` 不会改变 $s_0$；一组轨迹之间只有策略采样不同。
 
+### 监督微调（SFT，T0007）
+
+`python -m jevtw.sft` 在专家状态上做模仿学习，作为 RL 的对照和起点。
+
+- **数据。** `scripts/build_sft_data.py --games <目录> --out <jsonl>` 让每局游戏沿自己的通关路线走一遍
+  （和 `scripts/diagnose_history.py` 的 `walk` 相同：`inventory` 之类不提供给智能体的命令跳过），
+  路线上的每个状态存一行。存的是原始材料而不是提示词：目标、到这一步为止的历史（每一步的命令和
+  之后那个 `Observation` 的全部字段）、当前的 `Observation`、$a^*$（通关路线上的命令）在选项里的序号。
+  训练时再用当次运行的 `PolicyConfig` 调 `build_prompt` 拼出提示词，所以同一份数据可以用于任何
+  `history_mode` / `history_window` / `prompt_format`。走不通或没有赢的游戏不产生数据，在统计里列出。
+  统计（游戏数、状态数、每局状态数、动作类型分布）打印并写到 `<out>.stats.json`。
+- **损失。** 一个状态的损失是 $-\log q(a^*\mid h_t)$，$q=\mathrm{softmax}_j\,\ell(a^j)$，$\ell(a^j)$ 就是
+  `LMPolicy.decision_forward` 返回的选项分数，和采样、GRPO 用的是同一个参数化（`sft.sft_loss`）。
+  没有推理（配置必须是 `max_reasoning_tokens = 0`，否则直接报错），也不训练 $p_t$（前向时 `forecast=False`）。
+- **优化。** AdamW（默认 `lr=1e-5`、`weight_decay=0`）。一步用 `--batch-decisions`（默认 32）个状态：
+  和 `Trainer.step` 一样逐个状态前向、把 损失 / 本步状态数 的梯度累加起来，再按 `GRPOConfig.grad_clip`
+  裁剪后更新一次。每个 epoch 用 `--seed` 决定的顺序把全部状态过一遍。第 $k$ 步（从 1 起）的学习率是
+  `lr * min(1, k / ceil(warmup_frac * 总步数))`，预热后保持不变（默认 `warmup_frac=0.1`、`epochs=5`）。
+  模型保持 `eval()`（没有 dropout），和 RL 一致。
+- **输出。** 每个 epoch 结束时：`metrics.jsonl` 里一行训练记录（`sft_loss`、`train_acc` 是这个 epoch 里
+  各状态被访问时的平均损失和 $a^*$ 排第一的比例，期间模型在变；没有 `passes`）、一行验证记录
+  （`train.evaluate()`，和 RL 的评测相同：从策略采样，每局 × 每个评测种子一个回合），
+  以及 `checkpoints/epochNN/`（模型和分词器）。`scripts/summarize_run.py` 认得这种运行：
+  训练一节变成每个 epoch 一行的表，只对 GRPO 有意义的检查（有没有非零优势的组等）跳过。
+- **局限。** 数据里只有专家会经过的状态。训练出的策略没见过自己犯错之后到达的状态，
+  rollout 中一步走偏之后的表现没有任何保证，误差会沿着轨迹累积（compounding errors）；
+  所以训练准确率高不代表胜率高，胜率只看验证记录。另外专家可能用到观测里没有的信息
+  （KeyChest 的第一步取决于钥匙藏在哪里），这类状态上准确率有上限。
+
+**从 SFT checkpoint 开始 RL。** `python -m jevtw.train --model runs/<SFT>/checkpoints/epochNN --tokenizer Qwen/Qwen3-1.7B …`
+不需要新代码：checkpoint 目录就是一个普通的模型目录。$\beta>0$ 时，冻结的参考模型是训练开始时模型的
+深拷贝，也就是这个 SFT checkpoint，而不是原始的 Qwen；KL 项因此把策略拉向 SFT 的结果。
+SFT checkpoint 里没有 `platt.json`（SFT 不训练预测），所以之后开 Platt 的 RL 运行照常用第一个 batch 的数据
+初始化 $b$。
+
+**最终评测。** `scripts/final_eval.py --config … --model … --tokenizer … --games data/games_<难度>/test --out runs/<ID>/final_test`
+用固定的采样种子 101、102、103（训练和验证都不用这三个），每局 × 每个种子各采样一个回合
+（就是 `train.evaluate()`）。`summary.json` 给出回合数、赢的局数、胜率、胜率的 Wilson 95% 区间
+$\frac{\hat p+\frac{z^2}{2n}\pm z\sqrt{\frac{\hat p(1-\hat p)}{n}+\frac{z^2}{4n^2}}}{1+\frac{z^2}{n}}$（$z=1.96$；它把各回合当作独立样本，
+而三个种子其实共用同一批游戏，所以区间偏窄）、平均步数、按动作类型（命令的第一个词）的计数，
+有 $p_t$ 时还有 `forecast_auc`、`forecast_auc_t0`、`forecast_brier`、`forecast_brier_const`；
+`episodes.jsonl` 是每个回合的轨迹（`--save-forecasts` 的格式）。目录里已有结果时拒绝运行。
+`scripts/aggregate_final.py` 合并同一方法几个训练种子的 `summary.json`：每个种子的数字、均值、
+标准差（样本标准差，分母 $n-1$），以及把赢的局数和回合数加总后的 Wilson 区间（忽略了各种子是不同的模型）。
+测试集只在 issue 明确要求“最终评测”时使用，不能用来选 checkpoint 或超参数。
+
 ## 3. 需要注意的地方
 
 1. **$\lambda>0$ 时，全输的组也会产生满量级的优势。** 笔记保证了“任何一局赢都比任何一局输好”，
@@ -283,4 +329,5 @@ token。这正是 `decision_forward` 在前缀里给推理 token 打分所需要
 | `tests/test_t0004.py` | `history_mode="full"` 的提示词和改动前逐字相同（KeyChest 固定轨迹的快照、TextWorld 上按旧格式重建）；`"feedback"` 模式下房间描述、背包、notes 各出现一次；移动的反馈只保留房间标题；两种模式下 `collect_batch(parallel=1)` 等于 `run_episode`；不传 `--wandb-project` 时不 import wandb，传了之后 `init` / `log` / `finish` 的参数（step、`val/` 前缀、`pass1/`、`pass_last/`），online 初始化失败时改用 offline 并继续训练 |
 | `tests/test_t0006.py` | `plain` 的提示词和改动前逐字相同；两种对话格式的提示词快照；每种格式、每种结束方式（`Answer:`、EOS、思考块内外截断、没有推理，共 17 种情形）下的结束类型、后缀和不变式，`decision_forward` 等于朴素参考（1e-4），梯度一致；采样（逐条和 batch）时记录的概率等于打分时的概率，四种结束方式都由采样走到；`collect_batch(parallel=1)` 等于 `run_episode`；`reasoning_end_cap_in_think` 指标；`Config` 的警告 |
 | `tests/test_t0005.py` | 默认配置下 $\ell_j$、$p$、两遍的损失和更新后的参数与改动前的快照逐位相同；三种 `forecast_format` 的序列构造、$\ell_j$ 一致（1e-5）、$s$ 和梯度等于“每个选项一条完整序列”的朴素参考（1e-4）；BCE 的数值和对 logit 的梯度 $p-z$，Brier 的梯度在 $p\to1$ 时消失；`platt_only` 下语言模型的更新与没有校准项时逐位相同；Platt 的数据初始化公式和截断、参数组学习率、预热不作用于 Platt 组、`platt.json` 存取；AUC 等于两两比较的暴力计数；`forecast_brier_const` 按决策加权；forecasts 记录的字段；端到端：`--smoke` 训练并保存 checkpoint，再用 `--model <目录> --batches 0 --save-forecasts` 评测 |
+| `tests/test_t0007.py` | `build_sft_data.py` 在真实 cooking 游戏上的输出与通关路线一致，原始材料能重建两种 `history_mode` 的提示词；SFT 损失等于用 `decision_forward` 的分数手算的交叉熵，也等于 `score()` 的动作项；一步的梯度等于平均损失的梯度，预热的学习率；KeyChest 专家数据上损失下降、准确率上升（第一步不可观测，只能学到多数类）；端到端：`jevtw.sft --smoke` 的 checkpoint 能被 `jevtw.train --model <目录>`（$\beta>0$，第一遍 KL 为 0）和 `final_eval.py` 加载，`summarize_run.py` 能读 SFT 运行并报告未完成 / 非有限损失；Wilson 区间等于手算值；`aggregate_final.py` 的均值、标准差、合并计数 |
 | `tests/test_policy_trainer.py` | 提示词的历史窗口；KV cache 采样的概率等于打分的概率；共享前缀打分与朴素参考实现的数值、梯度一致（推理的四种结束方式，一位数和两位数选项）；嵌入层和输出层处理的 token 数等于“一次前缀 + 各选项后缀”；动作分布等于对选项的 softmax，`p_options` 等于逐选项读出的 $p_j$；无推理模式；同一组共享初始状态且可复现；第一遍的损失等于公式值（两种归一化）；参数确实被更新；$\lambda=\alpha=\beta=0$ 且全组结果相同时不更新；KL 的检查 |
