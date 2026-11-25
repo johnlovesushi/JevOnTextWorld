@@ -80,3 +80,46 @@ def test_real_game_passes(tmp_path):
     row = cg.check_game(path)
     assert row["ok1"] and row["ok2"] and row["won"] and row["verbs"]
     assert row["agent_steps"] == row["walkthrough_len"] - len(row["skipped"])
+
+
+def test_walk_skips_open_of_an_open_container(monkeypatch, tmp_path):
+    """E0011: tw-cooking walkthroughs with two ingredients repeat `open fridge`; the second one is not admissible."""
+    import diagnose_history as dh
+    from jevtw.envs import Observation
+
+    class FakeEnv:
+        objective = "cook"
+
+        def __init__(self, path):
+            self.open, self.won = False, False
+
+        def _keep(self, cmd):
+            return cmd != "inventory"
+
+        def _obs(self):
+            cmds = (["close fridge", "take a", "take b"] if self.open else ["open fridge"]) + ["eat meal"]
+            return Observation(text="", commands=[] if self.won else cmds, done=self.won, won=self.won, feedback="")
+
+        def reset(self, seed):
+            return self._obs()
+
+        def step(self, cmd):
+            self.open = self.open or cmd == "open fridge"
+            self.won = cmd == "eat meal"
+            return self._obs()
+
+        def close(self):
+            pass
+
+    game = tmp_path / "g.z8"
+    game.with_suffix(".json").write_text(json.dumps({"metadata": {
+        "walkthrough": ["inventory", "open fridge", "take a", "open fridge", "take b", "eat meal"]}}))
+    monkeypatch.setattr(dh, "TextWorldEnv", FakeEnv)
+    *states, end = dh.walk(game)                                   # default: the old behaviour, a problem
+    assert end["problem"] == "'open fridge' is not admissible at step 2" and not end["won"] and len(states) == 2
+    *states, end = dh.walk(game, skip_redundant_open=True)
+    assert end["won"] and end["problem"] is None and end["steps"] == 4 and end["redundant"] == ["open fridge"]
+    assert [s[4] for s in states] == ["open fridge", "take a", "take b", "eat meal"]
+    game.with_suffix(".json").write_text(json.dumps({"metadata": {"walkthrough": ["open oven", "eat meal"]}}))
+    *states, end = dh.walk(game, skip_redundant_open=True)         # not open and not admissible: still a problem
+    assert end["problem"] == "'open oven' is not admissible at step 0"

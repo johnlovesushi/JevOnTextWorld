@@ -129,14 +129,17 @@ def walkthrough(game_path: Path) -> list[str]:
     return list(json.loads(game_path.with_suffix(".json").read_text())["metadata"]["walkthrough"])
 
 
-def walk(game_path: Path):
+def walk(game_path: Path, skip_redundant_open: bool = False):
     """Yield (t, objective, history, obs, a_star) for every state on the walkthrough, then a final dict
-    {"won", "skipped", "problem"}. `history` is the list of (command, observation after it) so far. The walk
-    stops early (problem != None) if the next walkthrough command is not among the admissible commands."""
+    {"won", "skipped", "problem", "steps", "redundant"}. `history` is the list of (command, observation after it)
+    so far. The walk stops early (problem != None) if the next walkthrough command is not among the admissible
+    commands. With `skip_redundant_open`, an `open X` that is not admissible while `close X` is (X is already
+    open: tw-cooking walkthroughs with several ingredients repeat `open fridge` and `open <door>`) is left out
+    and listed under "redundant" instead."""
     env = TextWorldEnv(game_path)
     try:
         obs = env.reset(0)
-        history, skipped, problem, t = [], [], None, 0
+        history, skipped, redundant, problem, t = [], [], [], None, 0
         for command in walkthrough(game_path):
             if not env._keep(command):            # look / inventory / examine X: not an option of the agent
                 skipped.append(command)
@@ -144,6 +147,10 @@ def walk(game_path: Path):
             if obs.done:
                 problem = f"game over before {command!r}"
                 break
+            if (skip_redundant_open and command not in obs.commands and command.startswith("open ")
+                    and "close " + command[len("open "):] in obs.commands):
+                redundant.append(command)
+                continue
             if command not in obs.commands:
                 problem = f"{command!r} is not admissible at step {t}"
                 break
@@ -151,7 +158,7 @@ def walk(game_path: Path):
             after = env.step(command)
             history.append((command, after))
             obs, t = after, t + 1
-        yield {"won": bool(obs.won), "skipped": skipped, "problem": problem, "steps": t}
+        yield {"won": bool(obs.won), "skipped": skipped, "problem": problem, "steps": t, "redundant": redundant}
     finally:
         env.close()
 

@@ -9,7 +9,9 @@ For every game (its .z8 / .ulx and the .json next to it):
      "grill the X" <-> `cook X with BBQ`, "chop / slice / dice the X" <-> `chop / slice / dice X with knife`.
      The directions are also compared with metadata.ingredients ([name, cooked state, cut state]), which is the
      generator's own record of what the recipe needs;
-  2. the walkthrough is played in TextWorldEnv (scripts/diagnose_history.py, `walk`) and has to end in a win;
+  2. the walkthrough is played in TextWorldEnv (scripts/diagnose_history.py, `walk`) and has to end in a win.
+     An `open X` of the walkthrough while X is already open (not admissible, `close X` is) is skipped and counted
+     in `redundant_open`; `agent_steps` is the number of commands actually played. --strict-open turns this off;
   3. statistics: walkthrough length, number of directions per verb, games whose walkthrough leaves the first room
      (`go ...`) and games with a BBQ.
 The exit status is 1 if any game fails check 1 or 2.
@@ -71,7 +73,7 @@ def check_recipe(metadata: dict) -> dict:
             "missing": missing, "mismatch": mismatch, "has_prepare": "prepare meal" in directions(metadata["recipe"])}
 
 
-def check_game(path: Path, play: bool = True) -> dict:
+def check_game(path: Path, play: bool = True, strict_open: bool = False) -> dict:
     metadata = json.loads(path.with_suffix(".json").read_text())["metadata"]
     row = {"game": path.name, **check_recipe(metadata)}
     walk_cmds = list(metadata["walkthrough"])
@@ -83,8 +85,9 @@ def check_game(path: Path, play: bool = True) -> dict:
     if play:
         from diagnose_history import walk
 
-        *states, end = list(walk(path))
-        row.update(won=bool(end["won"]), problem=end["problem"], agent_steps=end["steps"], skipped=end["skipped"])
+        *states, end = list(walk(path, skip_redundant_open=not strict_open))
+        row.update(won=bool(end["won"]), problem=end["problem"], agent_steps=end["steps"], skipped=end["skipped"],
+                   redundant_open=end["redundant"])
     row["ok1"] = not row["missing"] and not row["mismatch"]
     row["ok2"] = (row["won"] and row["problem"] is None) if play else None
     return row
@@ -100,14 +103,15 @@ def summarize(rows: list[dict]) -> dict:
            "leaves_room": sum(r["leaves_room"] for r in rows), "has_bbq": sum(r["has_bbq"] for r in rows)}
     if rows and "agent_steps" in rows[0]:
         out["agent_steps"] = dict(sorted(Counter(r["agent_steps"] for r in rows).items()))
+        out["redundant_open"] = dict(sorted(Counter(len(r["redundant_open"]) for r in rows).items()))
     return out
 
 
-def run(sets: dict, play: bool = True) -> dict:
+def run(sets: dict, play: bool = True, strict_open: bool = False) -> dict:
     result = {}
     for name, directory in sets.items():
         paths = sorted(p for p in Path(directory).iterdir() if p.suffix in GAME_SUFFIXES)
-        rows = [check_game(p, play) for p in paths]
+        rows = [check_game(p, play, strict_open) for p in paths]
         result[name] = {"directory": str(directory), "summary": summarize(rows), "games": rows}
     return result
 
@@ -117,10 +121,11 @@ def main(argv=None) -> int:
     ap.add_argument("--games", nargs="+", required=True, help="NAME=directory pairs")
     ap.add_argument("--out", help="write the full result (one row per game) as JSON")
     ap.add_argument("--no-play", action="store_true", help="skip check 2 (do not start TextWorld)")
+    ap.add_argument("--strict-open", action="store_true", help="an `open X` on an open X fails check 2")
     args = ap.parse_args(argv)
     if args.out and Path(args.out).exists():
         ap.error(f"{args.out} already exists; choose a new file")
-    result = run(dict(pair.split("=", 1) for pair in args.games), play=not args.no_play)
+    result = run(dict(pair.split("=", 1) for pair in args.games), play=not args.no_play, strict_open=args.strict_open)
     failed = False
     for name, block in result.items():
         s = block["summary"]
