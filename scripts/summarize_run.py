@@ -26,13 +26,19 @@ TRAIN_KEYS = ("win_rate", "mean_return", "mean_bonus", "mixed_groups", "active_g
               "mean_forecast", "mean_forecast_logit", "cal_loss", "platt_a", "platt_b", "decisions", "reasoning_tokens", "rollout_s", "update_s",
               "gen_s", "score_s", "env_s", "prompt_s", "mean_reasoning_tokens", "reasoning_end_answer",
               "reasoning_end_eos", "reasoning_end_cap", "reasoning_end_cap_in_think", "mean_options",
-              "behavior_old_mean_abs_diff", "lr")
+              "behavior_old_mean_abs_diff", "lr", "mean_conf", "mean_conf_hat", "conf_entropy", "conf_brier",
+              "mean_abs_conf_adv")
 SAMPLING_KEYS = ("sec_per_decision", "gen_s", "score_s", "env_s", "prompt_s", "mean_reasoning_tokens",
                  "reasoning_end_answer", "reasoning_end_eos", "reasoning_end_cap", "reasoning_end_cap_in_think",
                  "mean_options")
-PASS_KEYS = ("loss", "grad_norm", "clip_frac", "kl", "cal_loss", "kl_old", "tis_mean_w", "tis_capped_frac")
+PASS_KEYS = ("loss", "grad_norm", "clip_frac", "kl", "cal_loss", "kl_old", "tis_mean_w", "tis_capped_frac",
+             "conf_loss", "conf_clip_frac", "conf_kl")
 FORECAST_KEYS = ("forecast_auc", "forecast_auc_t0", "forecast_s_mean_win", "forecast_s_mean_lose",
                  "mean_forecast_logit")
+CONF_KEYS = ("conf_brier", "conf_brier_const", "mean_conf_hat", "conf_auc", "conf_auc_t0", "conf_entropy",
+             "conf_offset", "conf_logloss", "conf_ece", "conf_auc_within", "conf_auc_step_gain", "conf_saturation")
+CALIB_P_KEYS = ("forecast_offset", "forecast_logloss", "forecast_ece", "forecast_auc_within", "forecast_auc_step_gain",
+                "forecast_saturation")
 LOGP_DIFF_WARN = 0.05
 CLIP_WARN = 0.2
 KL_OLD_WARN = 0.1                         # mean last-pass KL(pi_old || pi_theta) per likelihood term
@@ -151,7 +157,7 @@ def summarize(run_dir: Path, run_id: str, title: str) -> dict:
         "progress": {"batches_done": len(train), "batches_planned": planned,
                      "last_batch": train[-1]["batch"] if train else None},
         "val": [{k: r.get(k) for k in ("batch", "win_rate", "forecast_brier", "forecast_brier_const", "mean_forecast",
-                                       "mean_length") + FORECAST_KEYS + (
+                                       "mean_length") + FORECAST_KEYS + CONF_KEYS + CALIB_P_KEYS + (
                                        "episodes", "eval_s") + SAMPLING_KEYS} for r in val],
         "cal_loss_kind": train[-1].get("cal_loss_kind") if train else None,
         "sft": [{"epoch": r["batch"], **{k: r.get(k) for k in SFT_KEYS}} for r in train] if sft else None,
@@ -202,6 +208,21 @@ def markdown(s: dict, log_tail: str | None, notes: str | None) -> str:
                   "decisions too, w being the decision-weighted win rate):", "",
                   "| batch | AUC | AUC t0 | mean s (won) | mean s (lost) | mean s |", "|---|---|---|---|---|---|"]
         lines += ["| " + " | ".join([str(v["batch"])] + [fmt(v.get(k)) for k in FORECAST_KEYS]) + " |"
+                  for v in s["val"]]
+    if any(v.get(k) is not None for v in s["val"] for k in CALIB_P_KEYS):
+        lines += ["", "Calibration of p_t during validation (offset = |mean p - win rate|, log loss with p clipped to "
+                  "[0.01, 0.99], ECE over 10 equal-width bins, AUC within games, AUC gain over the step index t, "
+                  "fraction of p <= 0.005 or >= 0.995):", "",
+                  "| batch | offset | log loss | ECE | AUC within | AUC gain over t | saturation |",
+                  "|---|---|---|---|---|---|---|"]
+        lines += ["| " + " | ".join([str(v["batch"])] + [fmt(v.get(k)) for k in CALIB_P_KEYS]) + " |"
+                  for v in s["val"]]
+    if any(v.get(k) is not None for v in s["val"] for k in CONF_KEYS):
+        lines += ["", "Verbal confidence during validation (c-hat = sum_m pi^c(m) v_m per decision; Brier and AUC of "
+                  "c-hat against z; entropy of pi^c in nats; the last six columns as for p_t):", "",
+                  "| batch | Brier | const Brier | mean c-hat | AUC | AUC t0 | entropy | offset | log loss | ECE | "
+                  "AUC within | AUC gain over t | saturation |", "|" + "---|" * 13]
+        lines += ["| " + " | ".join([str(v["batch"])] + [fmt(v.get(k)) for k in CONF_KEYS]) + " |"
                   for v in s["val"]]
     if any(v.get("sec_per_decision") is not None for v in s["val"]):
         lines += ["", "Sampling during validation (seconds are totals for the evaluation; the reasoning columns are "

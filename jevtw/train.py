@@ -32,7 +32,7 @@ import torch
 
 from .config import Config
 from . import dist as dist_mod
-from .diagnostics import forecast_metrics, write_forecasts, write_reasonings
+from .diagnostics import forecast_metrics, verbal_metrics, write_forecasts, write_reasonings
 from .envs import KeyChestEnv, TextWorldEnv
 from .policy import PLATT_FILE, LMPolicy
 from .rollout import collect_batch, rollout_metrics
@@ -97,7 +97,7 @@ def evaluate(policy: LMPolicy, games, seeds, max_actions: int, parallel: int = 1
     return {"episodes": len(episodes), "win_rate": sum(ep.z for ep in episodes) / len(episodes),
             "mean_length": sum(ep.length for ep in episodes) / len(episodes),
             "gpu_peak_gb": None if peak is None else round(peak, 2),
-            **forecast_metrics(episodes), **sampling}
+            **forecast_metrics(episodes), **verbal_metrics(episodes), **sampling}
 
 
 def save_checkpoint(directory: Path, model, tokenizer, policy: LMPolicy) -> None:

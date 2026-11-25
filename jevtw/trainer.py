@@ -28,16 +28,25 @@ import torch
 
 from .config import GRPOConfig
 from .dist import Dist, balance
-from .losses import calibration_loss, calibration_weights, decision_loss, policy_weights, tis_weights
+from .losses import (calibration_loss, calibration_weights, conf_term_loss, decision_loss, policy_weights,
+                     tis_weights)
 from .policy import LMPolicy
-from .rewards import brier_bonus, episode_return, group_advantages
+from .rewards import brier_bonus, decoupled_conf_advantage, episode_return, group_advantages
 from .rollout import Episode
 
 
 def assign_returns(groups: Sequence[Sequence[Episode]], cfg: GRPOConfig) -> None:
+    """R_i, b_i and the advantages. With verbal confidence (decisions carry conf_bin) b_i uses the sampled c_t
+    in place of p_t, and with conf_advantage = "decoupled" every decision also gets A^c_t (`conf_adv`)."""
     for group in groups:
         for ep in group:
-            if cfg.lam > 0:
+            verbal = ep.decisions[0].conf_bin is not None
+            if verbal:
+                ep.bonus = brier_bonus([d.conf for d in ep.decisions], ep.z)
+                if cfg.conf_advantage == "decoupled":
+                    for d in ep.decisions:
+                        d.conf_adv = decoupled_conf_advantage(d.conf_logps, d.conf_bin, ep.z)
+            elif cfg.lam > 0:
                 forecasts = [d.p for d in ep.decisions]
                 if any(p is None for p in forecasts):
                     raise ValueError("lam > 0 needs rollout forecasts (PolicyConfig.forecast = True)")
@@ -45,7 +54,7 @@ def assign_returns(groups: Sequence[Sequence[Episode]], cfg: GRPOConfig) -> None
             elif ep.decisions[0].p is not None:
                 ep.bonus = brier_bonus([d.p for d in ep.decisions], ep.z)   # logged only
             ep.ret = episode_return(ep.z, ep.bonus if cfg.lam > 0 else 0.0, cfg.lam)
-        for ep, a in zip(group, group_advantages([ep.ret for ep in group], cfg.adv_delta)):
+        for ep, a in zip(group, group_advantages([ep.ret for ep in group], cfg.adv_delta, cfg.adv_norm)):
             ep.advantage = a
 
 
@@ -58,6 +67,9 @@ class Trainer:
             raise ValueError('cal_grad = "platt_only" needs Platt scaling (PolicyConfig.platt = True)')
         self.policy, self.cfg, self.reference = policy, cfg, reference_model
         self.dist = dist if dist is not None else Dist()
+        self.verbal = policy.cfg.confidence_mode == "verbal"
+        if self.verbal and cfg.tis_cap is not None:
+            raise ValueError("tis_cap is not implemented for the verbal confidence term")
         params = [p for p in policy.model.parameters() if p.requires_grad]
         if optimizer is None:
             if policy.cfg.platt:
@@ -80,23 +92,37 @@ class Trainer:
                     group["lr"] = base * factor
         return factor
 
+    def _conf_advantage(self, ep: Episode, d) -> float:
+        return d.conf_adv if self.cfg.conf_advantage == "decoupled" else ep.advantage
+
     def _active(self, ep: Episode) -> bool:
-        return ep.advantage != 0 or self.cfg.alpha > 0 or self.cfg.beta > 0
+        if ep.advantage != 0 or self.cfg.alpha > 0 or self.cfg.beta > 0:
+            return True
+        return self.verbal and self.cfg.conf_coef > 0 and any(self._conf_advantage(ep, d) != 0 for d in ep.decisions)
+
+    def _score(self, d, model=None):
+        """(logps, s, log pi^c(m_t) or None) of one decision, with the sequences the rollout used."""
+        forecast = self.policy.cfg.forecast
+        if self.verbal:
+            logps, s, log_pc = self.policy.score_with_confidence(d, model=model, forecast=forecast)
+            return logps, s, log_pc[d.conf_bin]
+        logps, s = self.policy.score(d, model=model, forecast=forecast)
+        return logps, s, None
 
     def _owners(self, groups) -> dict:
         """(g, i, t) -> process that scores this decision, for the decisions of active episodes. Cost = tokens of
         the folded forward (action context + options)."""
         keys = [(g, i, t) for g, group in enumerate(groups) for i, ep in enumerate(group) if self._active(ep)
                 for t in range(len(ep.decisions))]
+        extra = (len(self.policy.verbal_prompt_ids) + sum(len(b) for b in self.policy.bin_ids)) if self.verbal else 0
         costs = []
         for g, i, t in keys:
             d = groups[g][i].decisions[t]
-            costs.append(len(d.action_context_ids) + sum(len(o) for o in d.option_ids))
+            costs.append(len(d.action_context_ids) + sum(len(o) for o in d.option_ids) + extra)
         return dict(zip(keys, balance(costs, self.dist.world)))
 
     @torch.no_grad()
     def _fix_old(self, groups, owner):
-        forecast = self.policy.cfg.forecast
         max_diff, sum_diff, terms = 0.0, 0.0, 0
         for g, group in enumerate(groups):
             for i, ep in enumerate(group):
@@ -105,13 +131,18 @@ class Trainer:
                 for t, d in enumerate(ep.decisions):
                     if owner[(g, i, t)] != self.dist.rank:
                         continue
-                    old, _ = self.policy.score(d, forecast=forecast)
+                    old, _, conf_old = self._score(d)
                     d.old_logps = old.tolist()
                     diffs = [abs(a - b) for a, b in zip(d.old_logps, d.behavior_logps)]
+                    if conf_old is not None:
+                        d.conf_old_logp = float(conf_old)
+                        diffs.append(abs(d.conf_old_logp - d.conf_behavior_logp))
                     max_diff, sum_diff, terms = max(max_diff, max(diffs)), sum_diff + sum(diffs), terms + len(diffs)
                     if self.cfg.beta > 0:
-                        ref, _ = self.policy.score(d, model=self.reference, forecast=forecast)
+                        ref, _, conf_ref = self._score(d, model=self.reference)
                         d.ref_logps = ref.tolist()
+                        if conf_ref is not None:
+                            d.conf_ref_logp = float(conf_ref)
         (max_diff,) = self.dist.max_floats([max_diff])
         sum_diff, terms = self.dist.sum_floats([sum_diff, terms])
         return max_diff, (sum_diff / terms if terms else 0.0)
@@ -170,6 +201,7 @@ class Trainer:
         for _ in range(cfg.optimization_passes):
             self.optimizer.zero_grad(set_to_none=True)
             total, clipped, terms, kl, cal, kl_old, tis_sum, tis_capped = 0.0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0
+            conf_clipped, conf_terms, conf_kl, conf_loss = 0, 0, 0.0, 0.0
             for g, group in enumerate(groups):
                 for i, ep in enumerate(group):
                     if not self._active(ep):
@@ -179,7 +211,7 @@ class Trainer:
                             continue
                         # Same sequence as the rollout and as _fix_old; the forecast enters the loss only when
                         # alpha > 0.
-                        logps, s = self.policy.score(d, forecast=forecast)
+                        logps, s, conf_lp = self._score(d)
                         p = logit = None
                         if cfg.alpha > 0:
                             logit = self.policy.calibrated_logit(s.detach() if cfg.cal_grad == "platt_only" else s)
@@ -197,6 +229,15 @@ class Trainer:
                                                     p=p, z=float(ep.z),
                                                     cal_weight=w_cal[g][i][t], alpha=cfg.alpha, tis_weights=tis,
                                                     cal_loss=cfg.cal_loss, logit=logit)
+                        if conf_lp is not None:
+                            c_loss, c_stats = conf_term_loss(
+                                conf_lp, d.conf_old_logp, self._conf_advantage(ep, d), w_pol[g][i][t],
+                                cfg.clip_eps, cfg.conf_coef, ref_logp=d.conf_ref_logp, beta=cfg.beta)
+                            loss = loss + c_loss
+                            conf_loss += float(c_loss.detach())
+                            conf_clipped += c_stats["clipped"]
+                            conf_terms += 1
+                            conf_kl += c_stats.get("kl", 0.0) * w_pol[g][i][t]
                         loss.backward()
                         total += float(loss.detach())
                         clipped += stats["clipped"]
@@ -207,8 +248,9 @@ class Trainer:
             if self.dist.enabled:
                 self.dist.all_reduce_grads([q for q in self.policy.model.parameters() if q.requires_grad]
                                            + self.policy.platt_parameters())
-                total, clipped, terms, kl, cal, kl_old, tis_sum, tis_capped = self.dist.sum_floats(
-                    [total, clipped, terms, kl, cal, kl_old, tis_sum, tis_capped])
+                (total, clipped, terms, kl, cal, kl_old, tis_sum, tis_capped, conf_clipped, conf_terms, conf_kl,
+                 conf_loss) = self.dist.sum_floats([total, clipped, terms, kl, cal, kl_old, tis_sum, tis_capped,
+                                                    conf_clipped, conf_terms, conf_kl, conf_loss])
                 clipped, terms, tis_capped = int(clipped), int(terms), int(tis_capped)
             params = [q for q in self.policy.model.parameters() if q.grad is not None]
             grad_norm = float(torch.nn.utils.clip_grad_norm_(params, cfg.grad_clip)) if params else 0.0
@@ -216,6 +258,9 @@ class Trainer:
                 self.optimizer.step()
             record = {"loss": total, "grad_norm": grad_norm, "clip_frac": clipped / max(terms, 1),
                       "kl": kl, "cal_loss": cal, "kl_old": kl_old / max(terms, 1)}
+            if self.verbal:               # the confidence part of "loss"; kl above covers the action terms only
+                record.update({"conf_loss": conf_loss, "conf_clip_frac": conf_clipped / max(conf_terms, 1),
+                               "conf_kl": conf_kl})
             if cfg.tis_cap is not None:
                 record["tis_mean_w"] = tis_sum / max(terms, 1)
                 record["tis_capped_frac"] = tis_capped / max(terms, 1)
@@ -224,6 +269,15 @@ class Trainer:
         eps = [ep for group in groups for ep in group]
         forecasts = [d.p for ep in eps for d in ep.decisions if d.p is not None]
         logits = [d.forecast_logit for ep in eps for d in ep.decisions if d.forecast_logit is not None]
+        verbal = {}
+        if self.verbal:
+            ds = [d for ep in eps for d in ep.decisions]
+            verbal = {"mean_conf": sum(d.conf for d in ds) / len(ds),
+                      "mean_conf_hat": sum(d.conf_mean for d in ds) / len(ds),
+                      "conf_entropy": sum(d.conf_entropy for d in ds) / len(ds),
+                      "conf_brier": sum((d.conf - ep.z) ** 2 for ep in eps for d in ep.decisions) / len(ds)}
+            if cfg.conf_advantage == "decoupled":
+                verbal["mean_abs_conf_adv"] = sum(abs(d.conf_adv) for d in ds) / len(ds)
         platt = {}
         if platt_start:                   # a, b the batch was trained from (after the data-dependent start of b)
             platt = {"platt_a": platt_start[0], "platt_b": platt_start[1]}
@@ -236,7 +290,7 @@ class Trainer:
             "active_groups": sum(any(ep.advantage != 0 for ep in group) for group in groups),
             "mean_forecast": (sum(forecasts) / len(forecasts)) if forecasts else None,
             "mean_forecast_logit": (sum(logits) / len(logits)) if logits else None,
-            "cal_loss": rollout_cal, "cal_loss_kind": cfg.cal_loss, **platt,
+            "cal_loss": rollout_cal, "cal_loss_kind": cfg.cal_loss, **platt, **verbal,
             "sampling_vs_old_max_abs_logp_diff": max_diff,
             "behavior_old_mean_abs_diff": mean_diff,
             "lr": cfg.learning_rate * lr_factor,

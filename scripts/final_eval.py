@@ -32,6 +32,11 @@ sys.path.insert(0, str(ROOT))
 SEEDS = (101, 102, 103)
 Z95 = 1.959963984540054
 FORECAST_KEYS = ("forecast_auc", "forecast_auc_t0", "forecast_brier", "forecast_brier_const")
+# E0012 section 6: the same diagnostics for p_t (forecast_) and for the verbal confidence c-hat (conf_)
+PRED_KEYS = ("offset", "logloss", "ece", "auc_within", "auc_t_only", "auc_t_plus", "auc_step_gain", "saturation")
+CALIB_KEYS = (*(f"forecast_{k}" for k in PRED_KEYS),
+              "conf_brier", "conf_brier_sampled", "conf_brier_const", "mean_conf_hat", "mean_conf", "conf_auc",
+              "conf_auc_t0", "conf_entropy", "conf_saturation_sampled", *(f"conf_{k}" for k in PRED_KEYS))
 
 
 def wilson(wins: int, n: int, z: float = Z95) -> list[float]:
@@ -51,7 +56,7 @@ def summarize(records: list[dict], metrics: dict) -> dict:
     out = {"episodes": n, "wins": wins, "win_rate": wins / n, "wilson95": wilson(wins, n),
            "mean_length": sum(r["length"] for r in records) / n, "games": len({r["game"] for r in records}),
            "action_types": dict(types.most_common())}
-    out.update({k: metrics[k] for k in FORECAST_KEYS if metrics.get(k) is not None})
+    out.update({k: metrics[k] for k in FORECAST_KEYS + CALIB_KEYS if metrics.get(k) is not None})
     return out
 
 
@@ -115,7 +120,7 @@ def write_summary(out, args, cfg, metrics, start, run_metadata):
                "gpu_peak_gb": metrics.get("gpu_peak_gb"), **run_metadata(cfg, args)}
     (out / "summary.json").write_text(json.dumps(summary, indent=1) + "\n")
     print(json.dumps({k: summary[k] for k in ("episodes", "wins", "win_rate", "wilson95", "mean_length",
-                                              "action_types", *[f for f in FORECAST_KEYS if f in summary])}, indent=1))
+                                              "action_types", *[f for f in FORECAST_KEYS + CALIB_KEYS if f in summary])}, indent=1))
     print(f"wrote {out / 'summary.json'}")
 
 

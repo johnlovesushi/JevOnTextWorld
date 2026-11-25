@@ -84,7 +84,15 @@ def test_single_process_helpers_are_identity():
     assert d.sum_floats([1.5, 2]) == [1.5, 2]
 
 
-@pytest.mark.parametrize("policy_kw,grpo_kw", [({}, {}), ({"platt": False}, {"alpha": 0.0, "cal_grad": "full"})])
+VERBAL = {"platt": False, "confidence_mode": "verbal", "forecast": False}
+
+
+@pytest.mark.parametrize("policy_kw,grpo_kw", [
+    ({}, {}), ({"platt": False}, {"alpha": 0.0, "cal_grad": "full"}),
+    (VERBAL, {"alpha": 0.0, "cal_grad": "full", "adv_norm": "mean"}),                              # E0012 group B
+    (VERBAL, {"alpha": 0.0, "cal_grad": "full", "adv_norm": "mean", "lam": 0.0, "conf_advantage": "decoupled",
+              "conf_coef": 0.3}),                                                                   # E0012 group C
+], ids=["logit-platt", "logit", "verbal-shared", "verbal-decoupled"])
 def test_two_processes_equal_one(tmp_path, policy_kw, grpo_kw):
     policy, reference, cfg = _setup(policy_kw, grpo_kw)
     groups = _groups(policy)
@@ -100,8 +108,9 @@ def test_two_processes_equal_one(tmp_path, policy_kw, grpo_kw):
             assert m[key] == single_metrics[key], key
         assert m.get("platt_b") == single_metrics.get("platt_b")
         for p_single, p_multi in zip(single_metrics["passes"], m["passes"]):
-            for key in ("loss", "grad_norm", "kl", "cal_loss", "clip_frac", "kl_old"):
-                assert p_multi[key] == pytest.approx(p_single[key], rel=1e-5, abs=1e-8), key
+            for key in ("loss", "grad_norm", "kl", "cal_loss", "clip_frac", "kl_old", "conf_loss", "conf_kl"):
+                if p_single.get(key) is not None:
+                    assert p_multi[key] == pytest.approx(p_single[key], rel=1e-5, abs=1e-8), key
         # atol = 1% of the learning rate: Adam divides by sqrt(v), so an element whose gradient is ~0 can move by
         # a visible fraction of lr when the summation order changes its rounding.
         for name, value in single_params.items():
