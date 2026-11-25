@@ -1,0 +1,116 @@
+{
+ "runs": {
+  "s17": {
+   "episodes": 120,
+   "wins": 118,
+   "wilson95": [
+    0.941264037027841,
+    0.9954174354340789
+   ],
+   "seeds": [
+    101,
+    102,
+    103
+   ],
+   "win_rate": 0.9833333333333333,
+   "mean_length": 9.108333333333333,
+   "forecast_auc": 0.7617875594971726,
+   "forecast_auc_t0": 0.7161016949152542,
+   "forecast_brier": 0.04299985819525195,
+   "forecast_brier_const": 0.041151836229720996
+  },
+  "s23": {
+   "episodes": 120,
+   "wins": 120,
+   "wilson95": [
+    0.9689808335812966,
+    1.0
+   ],
+   "seeds": [
+    101,
+    102,
+    103
+   ],
+   "win_rate": 1.0,
+   "mean_length": 8.633333333333333,
+   "forecast_auc": null,
+   "forecast_auc_t0": null,
+   "forecast_brier": 2.1191456997601907e-11,
+   "forecast_brier_const": 0.0
+  },
+  "s29": {
+   "episodes": 120,
+   "wins": 120,
+   "wilson95": [
+    0.9689808335812966,
+    1.0
+   ],
+   "seeds": [
+    101,
+    102,
+    103
+   ],
+   "win_rate": 1.0,
+   "mean_length": 8.558333333333334,
+   "forecast_auc": null,
+   "forecast_auc_t0": null,
+   "forecast_brier": 5.356168002902582e-11,
+   "forecast_brier_const": 0.0
+  }
+ },
+ "stats": {
+  "win_rate": {
+   "mean": 0.9944444444444445,
+   "std": 0.009622504486493794,
+   "n": 3
+  },
+  "mean_length": {
+   "mean": 8.766666666666666,
+   "std": 0.2982588361362209,
+   "n": 3
+  },
+  "forecast_auc": {
+   "mean": 0.7617875594971726,
+   "std": null,
+   "n": 1
+  },
+  "forecast_auc_t0": {
+   "mean": 0.7161016949152542,
+   "std": null,
+   "n": 1
+  },
+  "forecast_brier": {
+   "mean": 0.014333286090001694,
+   "std": 0.02482597968256508,
+   "n": 3
+  },
+  "forecast_brier_const": {
+   "mean": 0.013717278743240332,
+   "std": 0.023759023724876812,
+   "n": 3
+  }
+ },
+ "pooled": {
+  "wins": 358,
+  "episodes": 360,
+  "win_rate": 0.9944444444444445,
+  "wilson95": [
+   0.9799730019093272,
+   0.9984751418340759
+  ]
+ },
+ "action_types": {
+  "take": 741,
+  "cook": 382,
+  "drop": 375,
+  "examine": 362,
+  "prepare": 361,
+  "eat": 359,
+  "open": 203,
+  "slice": 165,
+  "dice": 108,
+  "chop": 90,
+  "close": 8,
+  "insert": 2
+ }
+}
