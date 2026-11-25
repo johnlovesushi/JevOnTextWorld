@@ -1,0 +1,1163 @@
+{
+ "e": {
+  "behaviour": {
+   "file": "runs/E0009e/forecasts/batch0000.jsonl",
+   "episodes": 80,
+   "endings": {
+    "lost": 72,
+    "ran out of steps": 7,
+    "win": 1
+   },
+   "mean_length": 11.75,
+   "lost_at_step": {
+    "3": 13,
+    "4": 5,
+    "5": 3,
+    "6": 5,
+    "7": 3,
+    "8": 7,
+    "9": 11,
+    "10": 2,
+    "11": 2,
+    "12": 2,
+    "13": 3,
+    "15": 2,
+    "16": 2,
+    "17": 3,
+    "18": 1,
+    "20": 1,
+    "21": 1,
+    "22": 2,
+    "25": 2,
+    "26": 2
+   },
+   "last_command_when_lost": [
+    [
+     "cook yellow potato with stove",
+     8
+    ],
+    [
+     "cook banana with stove",
+     7
+    ],
+    [
+     "cook red tuna with oven",
+     5
+    ],
+    [
+     "cook orange bell pepper with stove",
+     4
+    ],
+    [
+     "cook block of cheese with stove",
+     4
+    ],
+    [
+     "cook red bell pepper with oven",
+     4
+    ],
+    [
+     "cook red onion with oven",
+     4
+    ],
+    [
+     "cook lettuce with oven",
+     3
+    ],
+    [
+     "cook lettuce with stove",
+     3
+    ],
+    [
+     "cook red hot pepper with stove",
+     3
+    ],
+    [
+     "cook block of cheese with oven",
+     3
+    ],
+    [
+     "cook red apple with stove",
+     3
+    ],
+    [
+     "cook red potato with stove",
+     3
+    ],
+    [
+     "cook white onion with oven",
+     3
+    ],
+    [
+     "cook orange bell pepper with oven",
+     2
+    ],
+    [
+     "cook green bell pepper with oven",
+     2
+    ],
+    [
+     "cook yellow potato with oven",
+     2
+    ],
+    [
+     "cook red onion with stove",
+     2
+    ],
+    [
+     "cook green apple with stove",
+     1
+    ],
+    [
+     "cook pork chop with stove",
+     1
+    ],
+    [
+     "cook red tuna with stove",
+     1
+    ],
+    [
+     "cook red apple with oven",
+     1
+    ],
+    [
+     "cook red potato with oven",
+     1
+    ],
+    [
+     "eat white onion",
+     1
+    ],
+    [
+     "cook banana with oven",
+     1
+    ]
+   ],
+   "top_commands": [
+    [
+     "examine cookbook",
+     214
+    ],
+    [
+     "open fridge",
+     70
+    ],
+    [
+     "prepare meal",
+     61
+    ],
+    [
+     "close fridge",
+     33
+    ],
+    [
+     "take cookbook from counter",
+     32
+    ],
+    [
+     "take cookbook from table",
+     23
+    ],
+    [
+     "open oven",
+     17
+    ],
+    [
+     "drop cookbook",
+     16
+    ],
+    [
+     "take knife from table",
+     13
+    ],
+    [
+     "take yellow potato from counter",
+     12
+    ]
+   ],
+   "total_commands": 940,
+   "examine_cookbook_share": 0.2276595744680851,
+   "episodes_with_3_cookbook_in_a_row": 16,
+   "mean_longest_cookbook_run": 1.7125,
+   "episodes_take_then_release_same_item": 42,
+   "prepare_meal": {
+    "count": 61,
+    "episodes": 29
+   },
+   "eat_meal": {
+    "count": 1,
+    "episodes": 1
+   },
+   "after_first_take": {
+    "episodes": 80,
+    "commands": [
+     [
+      "open fridge",
+      20
+     ],
+     [
+      "cook yellow potato with stove",
+      5
+     ],
+     [
+      "take knife from counter",
+      5
+     ],
+     [
+      "put cookbook on stove",
+      4
+     ],
+     [
+      "cook red apple with stove",
+      4
+     ],
+     [
+      "cook red hot pepper with stove",
+      3
+     ],
+     [
+      "cook banana with stove",
+      3
+     ],
+     [
+      "cook red potato with stove",
+      3
+     ]
+    ]
+   }
+  },
+  "errors": {
+   "file": "runs/E0009e/forecasts/batch0000.jsonl",
+   "episodes": 80,
+   "lost_before_limit": 72,
+   "commands": {
+    "recook": 34,
+    "wrong_cook": 37,
+    "wrong_cut": 0,
+    "recut": 0,
+    "cut_no_knife": 0,
+    "other_item": 55
+   },
+   "episodes_with": {
+    "recook": 34,
+    "wrong_cook": 37,
+    "wrong_cut": 0,
+    "recut": 0,
+    "cut_no_knife": 0,
+    "other_item": 19
+   },
+   "last_command_kind_when_lost": [
+    [
+     "wrong_cook",
+     37
+    ],
+    [
+     "recook",
+     34
+    ],
+    [
+     "no processing error (eat ...)",
+     1
+    ]
+   ],
+   "reached": {
+    "needs_cook": 80,
+    "needs_cut": 80,
+    "prepared": 29,
+    "cut_done": 5,
+    "took_knife": 18,
+    "cook_done": 4
+   }
+  }
+ },
+ "f": {
+  "behaviour": {
+   "file": "runs/E0009f/forecasts/batch0000.jsonl",
+   "episodes": 80,
+   "endings": {
+    "lost": 71,
+    "ran out of steps": 9
+   },
+   "mean_length": 11.975,
+   "lost_at_step": {
+    "3": 16,
+    "4": 8,
+    "5": 5,
+    "6": 10,
+    "7": 1,
+    "10": 2,
+    "11": 2,
+    "12": 5,
+    "13": 2,
+    "14": 2,
+    "15": 5,
+    "16": 1,
+    "18": 1,
+    "19": 1,
+    "20": 1,
+    "21": 4,
+    "23": 1,
+    "25": 2,
+    "26": 1,
+    "29": 1
+   },
+   "last_command_when_lost": [
+    [
+     "cook yellow potato with stove",
+     6
+    ],
+    [
+     "cook banana with stove",
+     6
+    ],
+    [
+     "cook red onion with oven",
+     6
+    ],
+    [
+     "cook block of cheese with oven",
+     6
+    ],
+    [
+     "cook orange bell pepper with oven",
+     4
+    ],
+    [
+     "cook yellow potato with oven",
+     4
+    ],
+    [
+     "cook red potato with stove",
+     4
+    ],
+    [
+     "cook lettuce with stove",
+     3
+    ],
+    [
+     "cook lettuce with oven",
+     3
+    ],
+    [
+     "cook white onion with oven",
+     3
+    ],
+    [
+     "cook red hot pepper with oven",
+     2
+    ],
+    [
+     "cook red hot pepper with stove",
+     2
+    ],
+    [
+     "cook red tuna with oven",
+     2
+    ],
+    [
+     "cook green apple with stove",
+     2
+    ],
+    [
+     "cook banana with oven",
+     2
+    ],
+    [
+     "cook red bell pepper with oven",
+     2
+    ],
+    [
+     "cook red apple with oven",
+     2
+    ],
+    [
+     "cook orange bell pepper with stove",
+     1
+    ],
+    [
+     "eat orange bell pepper",
+     1
+    ],
+    [
+     "cook pork chop with stove",
+     1
+    ],
+    [
+     "cook pork chop with oven",
+     1
+    ],
+    [
+     "cook red onion with stove",
+     1
+    ],
+    [
+     "cook red apple with stove",
+     1
+    ],
+    [
+     "cook meal with stove",
+     1
+    ],
+    [
+     "cook green bell pepper with stove",
+     1
+    ],
+    [
+     "cook red tuna with stove",
+     1
+    ],
+    [
+     "chop red bell pepper with knife",
+     1
+    ],
+    [
+     "eat red onion",
+     1
+    ],
+    [
+     "cook white onion with stove",
+     1
+    ]
+   ],
+   "top_commands": [
+    [
+     "examine cookbook",
+     249
+    ],
+    [
+     "open fridge",
+     88
+    ],
+    [
+     "close fridge",
+     46
+    ],
+    [
+     "take cookbook from counter",
+     22
+    ],
+    [
+     "open oven",
+     21
+    ],
+    [
+     "close oven",
+     18
+    ],
+    [
+     "take knife from table",
+     16
+    ],
+    [
+     "prepare meal",
+     15
+    ],
+    [
+     "take yellow potato from counter",
+     13
+    ],
+    [
+     "cook green apple with oven",
+     13
+    ]
+   ],
+   "total_commands": 958,
+   "examine_cookbook_share": 0.2599164926931106,
+   "episodes_with_3_cookbook_in_a_row": 18,
+   "mean_longest_cookbook_run": 2.875,
+   "episodes_take_then_release_same_item": 29,
+   "prepare_meal": {
+    "count": 15,
+    "episodes": 11
+   },
+   "eat_meal": {
+    "count": 0,
+    "episodes": 0
+   },
+   "after_first_take": {
+    "episodes": 79,
+    "commands": [
+     [
+      "open fridge",
+      9
+     ],
+     [
+      "cook yellow potato with stove",
+      5
+     ],
+     [
+      "take knife from table",
+      5
+     ],
+     [
+      "take knife from counter",
+      4
+     ],
+     [
+      "cook banana with stove",
+      4
+     ],
+     [
+      "cook orange bell pepper with oven",
+      3
+     ],
+     [
+      "cook red hot pepper with stove",
+      3
+     ],
+     [
+      "take green apple from counter",
+      3
+     ]
+    ]
+   }
+  },
+  "errors": {
+   "file": "runs/E0009f/forecasts/batch0000.jsonl",
+   "episodes": 80,
+   "lost_before_limit": 71,
+   "commands": {
+    "recook": 35,
+    "wrong_cook": 32,
+    "wrong_cut": 1,
+    "recut": 0,
+    "cut_no_knife": 0,
+    "other_item": 100
+   },
+   "episodes_with": {
+    "recook": 35,
+    "wrong_cook": 32,
+    "wrong_cut": 1,
+    "recut": 0,
+    "cut_no_knife": 0,
+    "other_item": 25
+   },
+   "last_command_kind_when_lost": [
+    [
+     "recook",
+     35
+    ],
+    [
+     "wrong_cook",
+     32
+    ],
+    [
+     "no processing error (eat ...)",
+     2
+    ],
+    [
+     "other_item",
+     1
+    ],
+    [
+     "wrong_cut",
+     1
+    ]
+   ],
+   "reached": {
+    "needs_cook": 80,
+    "needs_cut": 80,
+    "prepared": 11,
+    "cut_done": 14,
+    "took_knife": 24,
+    "cook_done": 2
+   }
+  }
+ },
+ "g": {
+  "behaviour": {
+   "file": "runs/E0009g/forecasts/batch0000.jsonl",
+   "episodes": 80,
+   "endings": {
+    "lost": 68,
+    "win": 8,
+    "ran out of steps": 4
+   },
+   "mean_length": 11.55,
+   "lost_at_step": {
+    "3": 4,
+    "4": 7,
+    "5": 9,
+    "6": 3,
+    "7": 6,
+    "8": 6,
+    "9": 2,
+    "10": 2,
+    "11": 4,
+    "12": 3,
+    "13": 4,
+    "15": 2,
+    "16": 3,
+    "18": 3,
+    "19": 2,
+    "20": 3,
+    "21": 1,
+    "24": 1,
+    "25": 1,
+    "27": 1,
+    "28": 1
+   },
+   "last_command_when_lost": [
+    [
+     "cook orange bell pepper with stove",
+     6
+    ],
+    [
+     "cook yellow potato with stove",
+     5
+    ],
+    [
+     "cook banana with stove",
+     5
+    ],
+    [
+     "cook red onion with oven",
+     4
+    ],
+    [
+     "cook red onion with stove",
+     4
+    ],
+    [
+     "cook red hot pepper with stove",
+     3
+    ],
+    [
+     "cook block of cheese with oven",
+     3
+    ],
+    [
+     "cook yellow potato with oven",
+     3
+    ],
+    [
+     "cook white onion with oven",
+     3
+    ],
+    [
+     "cook red bell pepper with oven",
+     3
+    ],
+    [
+     "cook lettuce with oven",
+     2
+    ],
+    [
+     "cook pork chop with stove",
+     2
+    ],
+    [
+     "cook block of cheese with stove",
+     2
+    ],
+    [
+     "cook red apple with oven",
+     2
+    ],
+    [
+     "cook lettuce with stove",
+     2
+    ],
+    [
+     "cook red potato with stove",
+     2
+    ],
+    [
+     "chop yellow potato with knife",
+     1
+    ],
+    [
+     "eat lettuce",
+     1
+    ],
+    [
+     "cook green apple with oven",
+     1
+    ],
+    [
+     "cook red tuna with stove",
+     1
+    ],
+    [
+     "eat banana",
+     1
+    ],
+    [
+     "eat yellow potato",
+     1
+    ],
+    [
+     "cook green bell pepper with oven",
+     1
+    ],
+    [
+     "cook green bell pepper with stove",
+     1
+    ],
+    [
+     "cook red potato with oven",
+     1
+    ],
+    [
+     "chop red tuna with knife",
+     1
+    ],
+    [
+     "cook red tuna with oven",
+     1
+    ],
+    [
+     "eat red hot pepper",
+     1
+    ],
+    [
+     "dice red onion with knife",
+     1
+    ],
+    [
+     "slice red apple with knife",
+     1
+    ],
+    [
+     "eat red apple",
+     1
+    ],
+    [
+     "cook white onion with stove",
+     1
+    ],
+    [
+     "cook banana with oven",
+     1
+    ]
+   ],
+   "top_commands": [
+    [
+     "open fridge",
+     67
+    ],
+    [
+     "examine cookbook",
+     50
+    ],
+    [
+     "take cookbook from counter",
+     42
+    ],
+    [
+     "prepare meal",
+     41
+    ],
+    [
+     "take cookbook from table",
+     30
+    ],
+    [
+     "open oven",
+     21
+    ],
+    [
+     "close fridge",
+     19
+    ],
+    [
+     "take green apple from counter",
+     15
+    ],
+    [
+     "take red apple from counter",
+     15
+    ],
+    [
+     "cook red onion with stove",
+     15
+    ]
+   ],
+   "total_commands": 924,
+   "examine_cookbook_share": 0.05411255411255411,
+   "episodes_with_3_cookbook_in_a_row": 0,
+   "mean_longest_cookbook_run": 0.5875,
+   "episodes_take_then_release_same_item": 43,
+   "prepare_meal": {
+    "count": 41,
+    "episodes": 28
+   },
+   "eat_meal": {
+    "count": 8,
+    "episodes": 8
+   },
+   "after_first_take": {
+    "episodes": 80,
+    "commands": [
+     [
+      "open fridge",
+      31
+     ],
+     [
+      "take banana from counter",
+      8
+     ],
+     [
+      "take green apple from counter",
+      5
+     ],
+     [
+      "take green bell pepper from counter",
+      4
+     ],
+     [
+      "take yellow potato from counter",
+      4
+     ],
+     [
+      "take knife from table",
+      3
+     ],
+     [
+      "drop cookbook",
+      3
+     ],
+     [
+      "put cookbook on counter",
+      3
+     ]
+    ]
+   }
+  },
+  "errors": {
+   "file": "runs/E0009g/forecasts/batch0000.jsonl",
+   "episodes": 80,
+   "lost_before_limit": 68,
+   "commands": {
+    "recook": 20,
+    "wrong_cook": 39,
+    "wrong_cut": 4,
+    "recut": 0,
+    "cut_no_knife": 0,
+    "other_item": 111
+   },
+   "episodes_with": {
+    "recook": 20,
+    "wrong_cook": 39,
+    "wrong_cut": 4,
+    "recut": 0,
+    "cut_no_knife": 0,
+    "other_item": 36
+   },
+   "last_command_kind_when_lost": [
+    [
+     "wrong_cook",
+     39
+    ],
+    [
+     "recook",
+     20
+    ],
+    [
+     "no processing error (eat ...)",
+     5
+    ],
+    [
+     "wrong_cut",
+     4
+    ]
+   ],
+   "reached": {
+    "needs_cook": 80,
+    "needs_cut": 80,
+    "took_knife": 28,
+    "cut_done": 18,
+    "cook_done": 17,
+    "prepared": 28
+   }
+  }
+ },
+ "h": {
+  "behaviour": {
+   "file": "runs/E0009h/forecasts/batch0000.jsonl",
+   "episodes": 80,
+   "endings": {
+    "lost": 72,
+    "ran out of steps": 4,
+    "win": 4
+   },
+   "mean_length": 11.9625,
+   "lost_at_step": {
+    "3": 9,
+    "4": 5,
+    "5": 8,
+    "6": 3,
+    "7": 1,
+    "8": 7,
+    "9": 3,
+    "10": 3,
+    "11": 3,
+    "12": 4,
+    "13": 3,
+    "14": 4,
+    "15": 3,
+    "16": 3,
+    "17": 2,
+    "19": 3,
+    "20": 2,
+    "22": 1,
+    "24": 2,
+    "27": 1,
+    "28": 2
+   },
+   "last_command_when_lost": [
+    [
+     "cook yellow potato with stove",
+     7
+    ],
+    [
+     "cook lettuce with stove",
+     5
+    ],
+    [
+     "cook block of cheese with stove",
+     5
+    ],
+    [
+     "cook red onion with oven",
+     5
+    ],
+    [
+     "cook banana with stove",
+     4
+    ],
+    [
+     "cook red apple with oven",
+     4
+    ],
+    [
+     "cook red potato with oven",
+     4
+    ],
+    [
+     "cook red bell pepper with oven",
+     4
+    ],
+    [
+     "cook red hot pepper with stove",
+     3
+    ],
+    [
+     "cook red tuna with stove",
+     3
+    ],
+    [
+     "cook block of cheese with oven",
+     3
+    ],
+    [
+     "cook banana with oven",
+     3
+    ],
+    [
+     "cook yellow potato with oven",
+     2
+    ],
+    [
+     "cook red tuna with oven",
+     2
+    ],
+    [
+     "cook green apple with oven",
+     2
+    ],
+    [
+     "cook red onion with stove",
+     2
+    ],
+    [
+     "cook white onion with stove",
+     2
+    ],
+    [
+     "eat yellow potato",
+     1
+    ],
+    [
+     "cook orange bell pepper with stove",
+     1
+    ],
+    [
+     "cook orange bell pepper with oven",
+     1
+    ],
+    [
+     "eat orange bell pepper",
+     1
+    ],
+    [
+     "cook pork chop with stove",
+     1
+    ],
+    [
+     "cook pork chop with oven",
+     1
+    ],
+    [
+     "eat lettuce",
+     1
+    ],
+    [
+     "cook green bell pepper with stove",
+     1
+    ],
+    [
+     "cook red hot pepper with oven",
+     1
+    ],
+    [
+     "eat red onion",
+     1
+    ],
+    [
+     "eat white onion",
+     1
+    ],
+    [
+     "eat banana",
+     1
+    ]
+   ],
+   "top_commands": [
+    [
+     "examine cookbook",
+     123
+    ],
+    [
+     "prepare meal",
+     92
+    ],
+    [
+     "open fridge",
+     57
+    ],
+    [
+     "take cookbook from counter",
+     53
+    ],
+    [
+     "drop cookbook",
+     35
+    ],
+    [
+     "take cookbook from table",
+     34
+    ],
+    [
+     "put cookbook on counter",
+     27
+    ],
+    [
+     "take cookbook",
+     18
+    ],
+    [
+     "put cookbook on table",
+     15
+    ],
+    [
+     "take red onion from fridge",
+     15
+    ]
+   ],
+   "total_commands": 957,
+   "examine_cookbook_share": 0.12852664576802508,
+   "episodes_with_3_cookbook_in_a_row": 2,
+   "mean_longest_cookbook_run": 1.1125,
+   "episodes_take_then_release_same_item": 57,
+   "prepare_meal": {
+    "count": 92,
+    "episodes": 47
+   },
+   "eat_meal": {
+    "count": 4,
+    "episodes": 4
+   },
+   "after_first_take": {
+    "episodes": 80,
+    "commands": [
+     [
+      "drop cookbook",
+      13
+     ],
+     [
+      "open fridge",
+      10
+     ],
+     [
+      "put cookbook on counter",
+      9
+     ],
+     [
+      "take green apple from counter",
+      6
+     ],
+     [
+      "put cookbook on table",
+      6
+     ],
+     [
+      "cook red potato with oven",
+      4
+     ],
+     [
+      "take banana from counter",
+      3
+     ],
+     [
+      "cook yellow potato with oven",
+      2
+     ]
+    ]
+   }
+  },
+  "errors": {
+   "file": "runs/E0009h/forecasts/batch0000.jsonl",
+   "episodes": 80,
+   "lost_before_limit": 72,
+   "commands": {
+    "recook": 35,
+    "wrong_cook": 32,
+    "wrong_cut": 0,
+    "recut": 0,
+    "cut_no_knife": 0,
+    "other_item": 58
+   },
+   "episodes_with": {
+    "recook": 35,
+    "wrong_cook": 32,
+    "wrong_cut": 0,
+    "recut": 0,
+    "cut_no_knife": 0,
+    "other_item": 25
+   },
+   "last_command_kind_when_lost": [
+    [
+     "recook",
+     34
+    ],
+    [
+     "wrong_cook",
+     32
+    ],
+    [
+     "no processing error (eat ...)",
+     6
+    ]
+   ],
+   "reached": {
+    "needs_cook": 80,
+    "needs_cut": 80,
+    "cook_done": 8,
+    "prepared": 47,
+    "cut_done": 5,
+    "took_knife": 15
+   }
+  }
+ }
+}
