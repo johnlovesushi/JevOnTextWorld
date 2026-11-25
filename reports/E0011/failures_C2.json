@@ -1,0 +1,81 @@
+{
+ "max_actions": 38,
+ "runs": {
+  "base": {
+   "episodes": 80,
+   "wins": 0,
+   "losses": 80,
+   "lost_at_H": 4,
+   "lost_early": 76,
+   "last_command": {
+    "cook": 73,
+    "eat": 3
+   },
+   "commands": 724,
+   "go": 0,
+   "go_share": 0.0,
+   "returns": 0,
+   "loops": 0,
+   "loop_commands": 0,
+   "episodes_with_loop": 0
+  },
+  "sft": {
+   "episodes": 80,
+   "wins": 0,
+   "losses": 80,
+   "lost_at_H": 0,
+   "lost_early": 80,
+   "last_command": {
+    "cook": 65,
+    "slice": 6,
+    "dice": 6,
+    "chop": 3
+   },
+   "commands": 617,
+   "go": 0,
+   "go_share": 0.0,
+   "returns": 0,
+   "loops": 0,
+   "loop_commands": 0,
+   "episodes_with_loop": 0
+  },
+  "grpo": {
+   "episodes": 80,
+   "wins": 0,
+   "losses": 80,
+   "lost_at_H": 4,
+   "lost_early": 76,
+   "last_command": {
+    "cook": 75,
+    "eat": 1
+   },
+   "commands": 735,
+   "go": 0,
+   "go_share": 0.0,
+   "returns": 0,
+   "loops": 0,
+   "loop_commands": 0,
+   "episodes_with_loop": 0
+  },
+  "sftgrpo": {
+   "episodes": 80,
+   "wins": 0,
+   "losses": 80,
+   "lost_at_H": 0,
+   "lost_early": 80,
+   "last_command": {
+    "cook": 65,
+    "slice": 6,
+    "dice": 6,
+    "chop": 3
+   },
+   "commands": 617,
+   "go": 0,
+   "go_share": 0.0,
+   "returns": 0,
+   "loops": 0,
+   "loop_commands": 0,
+   "episodes_with_loop": 0
+  }
+ }
+}
