@@ -231,7 +231,15 @@ token。这正是 `decision_forward` 在前缀里给推理 token 打分所需要
   之后那个 `Observation` 的全部字段）、当前的 `Observation`、$a^*$（通关路线上的命令）在选项里的序号。
   训练时再用当次运行的 `PolicyConfig` 调 `build_prompt` 拼出提示词，所以同一份数据可以用于任何
   `history_mode` / `history_window` / `prompt_format`。走不通或没有赢的游戏不产生数据，在统计里列出。
-  统计（游戏数、状态数、每局状态数、动作类型分布）打印并写到 `<out>.stats.json`。
+  T0010 起默认跳过通关路线里多余的 `open X`（X 已经开着：`open X` 不在可选命令里而 `close X` 在；多种食材的
+  tw-cooking 路线会重复 `open fridge`、`open <门>`），用的是 E0011 的 `walk(..., skip_redundant_open=True)`，
+  被跳过的命令不产生状态；`--keep-redundant-open` 恢复原来的行为（这样的游戏走不通、被丢掉），输出和改动前逐字节相同。
+  统计（游戏数、状态数、每局状态数、动作类型分布；跳过时另有 `redundant_open_skipped`、
+  `games_with_redundant_open`）打印并写到 `<out>.stats.json`。
+- **多个难度（T0010）。** `--train-data` 可以给多个文件，所有状态合在一起、一起打乱（一步里混着各个难度）。
+  每个状态带一个难度标签：行里有 `level` 字段就用它，否则用文件名去掉 `.jsonl` 和结尾的 `_train`
+  （`data/sft/C3_train.jsonl` → `C3`）。多于一个难度时，训练行另外记录 `sft_loss_<难度>`、`train_acc_<难度>`、
+  `decisions_<难度>`；只有一个难度时日志和以前相同。双卡时每步的分难度损失和计数也跨进程求和。
 - **损失。** 一个状态的损失是 $-\log q(a^*\mid h_t)$，$q=\mathrm{softmax}_j\,\ell(a^j)$，$\ell(a^j)$ 就是
   `LMPolicy.decision_forward` 返回的选项分数，和采样、GRPO 用的是同一个参数化（`sft.sft_loss`）。
   没有推理（配置必须是 `max_reasoning_tokens = 0`，否则直接报错），也不训练 $p_t$（前向时 `forecast=False`）。
@@ -375,5 +383,6 @@ $\mathrm{logit}(\text{pred})$ 的逻辑回归（`diagnostics.logistic_fit`，牛
 | `tests/test_t0005.py` | 默认配置下 $\ell_j$、$p$、两遍的损失和更新后的参数与改动前的快照逐位相同；三种 `forecast_format` 的序列构造、$\ell_j$ 一致（1e-5）、$s$ 和梯度等于“每个选项一条完整序列”的朴素参考（1e-4）；BCE 的数值和对 logit 的梯度 $p-z$，Brier 的梯度在 $p\to1$ 时消失；`platt_only` 下语言模型的更新与没有校准项时逐位相同；Platt 的数据初始化公式和截断、参数组学习率、预热不作用于 Platt 组、`platt.json` 存取；AUC 等于两两比较的暴力计数；`forecast_brier_const` 按决策加权；forecasts 记录的字段；端到端：`--smoke` 训练并保存 checkpoint，再用 `--model <目录> --batches 0 --save-forecasts` 评测 |
 | `tests/test_t0007.py` | `build_sft_data.py` 在真实 cooking 游戏上的输出与通关路线一致，原始材料能重建两种 `history_mode` 的提示词；SFT 损失等于用 `decision_forward` 的分数手算的交叉熵，也等于 `score()` 的动作项；一步的梯度等于平均损失的梯度，预热的学习率；KeyChest 专家数据上损失下降、准确率上升（第一步不可观测，只能学到多数类）；端到端：`jevtw.sft --smoke` 的 checkpoint 能被 `jevtw.train --model <目录>`（$\beta>0$，第一遍 KL 为 0）和 `final_eval.py` 加载，`summarize_run.py` 能读 SFT 运行并报告未完成 / 非有限损失；Wilson 区间等于手算值；`aggregate_final.py` 的均值、标准差、合并计数 |
 | `tests/test_t0008.py` | 置信度候选答案和提示词；`verbal_forward` 的 $\pi^c$、$s$、$\ell_j$ 及梯度等于朴素参考（每个答案一条完整序列）；分块输出层（$M=101$）与不分块结果和梯度相同、每次调用的行数不超过块大小；采样记录的 $\pi^c$ 等于 `score_with_confidence`；logit 模式不多抽随机数；解耦优势手算值；均值优势；`assign_returns`；共享与解耦两种估计在小 softmax 模型上的期望梯度一致（蒙特卡洛）；命题 2；两种优势下的一步更新；`conf_term_loss` 的梯度和裁剪；解耦模式下动作优势全为 0 时仍训练置信度；`prediction_metrics` 手算值；`logistic_fit`；`verbal_metrics` 和 forecasts 记录；E0012 三组配置的 `--smoke` |
+| `tests/test_t0010.py` | `build_sft_data.py` 默认跳过多余的 `open`，数据和去掉它的通关路线一致；`--keep-redundant-open` 的输出（jsonl 和 stats）与改动前的脚本（从 git 取出）逐字节相同（假游戏和真实 cooking 游戏）；多个数据文件合并后样本数等于各文件之和、难度标签正确，`jevtw.sft --smoke` 分难度的损失 / 准确率加权后等于总数，单文件时日志没有分难度的键；`torchrun` 两进程与单进程的 SFT 指标一致 |
 | `tests/test_t0009.py` | LPT 分配；单进程时各 helper 是恒等；两个进程（gloo）的一次更新等于单进程（logit、verbal 共享 / 解耦）；`torchrun --nproc-per-node=2 --smoke` 与单进程的指标一致 |
 | `tests/test_policy_trainer.py` | 提示词的历史窗口；KV cache 采样的概率等于打分的概率；共享前缀打分与朴素参考实现的数值、梯度一致（推理的四种结束方式，一位数和两位数选项）；嵌入层和输出层处理的 token 数等于“一次前缀 + 各选项后缀”；动作分布等于对选项的 softmax，`p_options` 等于逐选项读出的 $p_j$；无推理模式；同一组共享初始状态且可复现；第一遍的损失等于公式值（两种归一化）；参数确实被更新；$\lambda=\alpha=\beta=0$ 且全组结果相同时不更新；KL 的检查 |

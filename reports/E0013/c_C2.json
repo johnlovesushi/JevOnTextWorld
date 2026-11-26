@@ -1,0 +1,225 @@
+{
+ "runs": {
+  "s17": {
+   "episodes": 80,
+   "wins": 0,
+   "wilson95": [
+    0.0,
+    0.0458181295355271
+   ],
+   "seeds": [
+    17,
+    23
+   ],
+   "win_rate": 0.0,
+   "mean_length": 8.6,
+   "forecast_auc": null,
+   "forecast_auc_t0": null,
+   "forecast_brier": 0.9711969907049892,
+   "forecast_brier_const": 0.0,
+   "forecast_offset": 0.9840449540940828,
+   "forecast_logloss": 4.327507812444155,
+   "forecast_ece": 0.9840449540940828,
+   "forecast_auc_within": null,
+   "forecast_auc_t_only": null,
+   "forecast_auc_t_plus": null,
+   "forecast_auc_step_gain": null,
+   "forecast_saturation": 0.8677325581395349,
+   "conf_brier": null,
+   "conf_brier_sampled": null,
+   "conf_brier_const": null,
+   "mean_conf_hat": null,
+   "mean_conf": null,
+   "conf_auc": null,
+   "conf_auc_t0": null,
+   "conf_entropy": null,
+   "conf_saturation_sampled": null,
+   "conf_offset": null,
+   "conf_logloss": null,
+   "conf_ece": null,
+   "conf_auc_within": null,
+   "conf_auc_t_only": null,
+   "conf_auc_t_plus": null,
+   "conf_auc_step_gain": null,
+   "conf_saturation": null
+  }
+ },
+ "stats": {
+  "win_rate": {
+   "mean": 0.0,
+   "std": null,
+   "n": 1
+  },
+  "mean_length": {
+   "mean": 8.6,
+   "std": null,
+   "n": 1
+  },
+  "forecast_auc": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_auc_t0": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_brier": {
+   "mean": 0.9711969907049892,
+   "std": null,
+   "n": 1
+  },
+  "forecast_brier_const": {
+   "mean": 0.0,
+   "std": null,
+   "n": 1
+  },
+  "forecast_offset": {
+   "mean": 0.9840449540940828,
+   "std": null,
+   "n": 1
+  },
+  "forecast_logloss": {
+   "mean": 4.327507812444155,
+   "std": null,
+   "n": 1
+  },
+  "forecast_ece": {
+   "mean": 0.9840449540940828,
+   "std": null,
+   "n": 1
+  },
+  "forecast_auc_within": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_auc_t_only": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_auc_t_plus": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_auc_step_gain": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_saturation": {
+   "mean": 0.8677325581395349,
+   "std": null,
+   "n": 1
+  },
+  "conf_brier": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "conf_brier_sampled": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "conf_brier_const": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "mean_conf_hat": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "mean_conf": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "conf_auc": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "conf_auc_t0": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "conf_entropy": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "conf_saturation_sampled": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "conf_offset": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "conf_logloss": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "conf_ece": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "conf_auc_within": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "conf_auc_t_only": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "conf_auc_t_plus": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "conf_auc_step_gain": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "conf_saturation": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  }
+ },
+ "pooled": {
+  "wins": 0,
+  "episodes": 80,
+  "win_rate": 0.0,
+  "wilson95": [
+   0.0,
+   0.0458181295355271
+  ]
+ },
+ "action_types": {
+  "take": 200,
+  "cook": 153,
+  "examine": 85,
+  "prepare": 71,
+  "drop": 68,
+  "open": 49,
+  "chop": 29,
+  "dice": 22,
+  "slice": 7,
+  "put": 4
+ }
+}

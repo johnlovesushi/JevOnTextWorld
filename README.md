@@ -73,7 +73,7 @@ python -m jevtw.train --config configs/grpo_calibrated.json --model Qwen/Qwen3-1
 加 `--save-forecasts` 会把每次评测中每一步的 $s$、$p$ 写到 `runs/<name>/forecasts/batchNNNN.jsonl`。
 加 `--save-reasonings` 会把每次评测中每个决策的推理文本写到 `runs/<name>/reasonings/batchNNNN.jsonl`；`scripts/sample_reasonings.py` 从中随机抽几段。
 只评测一个 checkpoint：`python -m jevtw.train --model runs/<name>/checkpoints/batchNNNN --val-games … --batches 0 --save-forecasts --out runs/<新目录>`。
-监督微调：`python scripts/build_sft_data.py --games data/games_<难度>/train --out data/sft/<名字>.jsonl`，然后 `python -m jevtw.sft --config … --train-data data/sft/<名字>.jsonl --val-games … --out runs/<name>`（每个 epoch 评测一次并保存 `checkpoints/epochNN`）；从它开始 RL：`python -m jevtw.train --model runs/<name>/checkpoints/epochNN --tokenizer Qwen/Qwen3-1.7B …`。
+监督微调：`python scripts/build_sft_data.py --games data/games_<难度>/train --out data/sft/<名字>.jsonl`，然后 `python -m jevtw.sft --config … --train-data data/sft/<名字>.jsonl [更多文件…] --val-games … --out runs/<name>`（多个文件时合并训练，按难度分别记录损失和准确率；`build_sft_data.py` 默认跳过多余的 `open`，见 T0010）（每个 epoch 评测一次并保存 `checkpoints/epochNN`）；从它开始 RL：`python -m jevtw.train --model runs/<name>/checkpoints/epochNN --tokenizer Qwen/Qwen3-1.7B …`。
 最终评测（只在 issue 要求时）：`python scripts/final_eval.py --config … --model … --games data/games_<难度>/test --out runs/<ID>/final_test`，多个训练种子用 `scripts/aggregate_final.py` 合并。
 提示词格式（`prompt_format`：`plain` / `chat_nothink` / `chat_think`）、预测的读法（`forecast_format`）、交叉熵校准损失（`cal_loss`）和 Platt 缩放（`platt`）见 `docs/implementation.md`。
 
