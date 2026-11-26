@@ -95,6 +95,23 @@ def test_verbal_forward_matches_reference(tokenizer, policy_cfg, ending, forecas
             assert s is None
 
 
+def test_verbal_forward_matches_reference_101_bins(tokenizer, policy_cfg):
+    """M = 101 (E0012d / e): answers " 0" .. " 100" in steps of 1, of 1-3 digits, all scored in the folded tree."""
+    model = tiny_model(seed=1)
+    policy = LMPolicy(model, tokenizer, _verbal_cfg(policy_cfg, confidence_bins=101))
+    assert [tokenizer.decode(b) for b in policy.bin_ids] == [f" {m}" for m in range(101)]
+    assert bin_values(101)[73] == pytest.approx(0.73)
+    d = _manual_decision(policy, ENDINGS[0], n_options=12, action=10)
+    with torch.no_grad():
+        _, scores, _, conf = policy.verbal_forward(model, d, False, range(12))     # as in the rollout (`decide`)
+        torch.testing.assert_close(scores, ref_option_scores(policy, model, d.action_context_ids, d.option_ids),
+                                   atol=2e-5, rtol=1e-5)
+        for j in (10, 3):
+            torch.testing.assert_close(conf[j], ref_conf(policy, model, d, j), atol=2e-5, rtol=1e-5)
+        _, _, log_pc = policy.score_with_confidence(d)                             # as in training
+        torch.testing.assert_close(log_pc, torch.log_softmax(conf[10], 0), atol=2e-5, rtol=1e-5)
+
+
 def test_verbal_forward_gradients_match_reference(tokenizer, policy_cfg):
     model = tiny_model(seed=2)
     policy = LMPolicy(model, tokenizer, _verbal_cfg(policy_cfg))
