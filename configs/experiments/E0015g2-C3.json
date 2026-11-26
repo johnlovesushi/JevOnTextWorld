@@ -1,0 +1,31 @@
+{
+ "policy": {
+  "max_reasoning_tokens": 0,
+  "history_window": 8,
+  "forecast": true,
+  "history_mode": "full",
+  "forecast_format": "after_eos",
+  "platt": true,
+  "prompt_format": "plain",
+  "confidence_mode": "logit"
+ },
+ "grpo": {
+  "games_per_batch": 4,
+  "group_size": 8,
+  "max_actions": 30,
+  "lam": 0.0,
+  "alpha": 0.1,
+  "beta": 0.04,
+  "clip_eps": 0.2,
+  "normalization": "token",
+  "optimization_passes": 2,
+  "learning_rate": 2e-06,
+  "grad_clip": 1.0,
+  "parallel_episodes": 32,
+  "warmup_batches": 5,
+  "cal_loss": "bce",
+  "cal_grad": "platt_only",
+  "platt_lr": 0.01,
+  "adv_norm": "mean"
+ }
+}
