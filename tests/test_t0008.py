@@ -112,6 +112,46 @@ def test_verbal_forward_matches_reference_101_bins(tokenizer, policy_cfg):
         torch.testing.assert_close(log_pc, torch.log_softmax(conf[10], 0), atol=2e-5, rtol=1e-5)
 
 
+def test_verbal_forward_chunks_the_output_layer(tokenizer, policy_cfg, monkeypatch):
+    """E0012d/e ran out of GPU memory: the rollout's `verbal_forward` with M = 101 sent every confidence token of all K
+    options to the output layer in one call (~400 K rows x the vocabulary in fp32). The rows now go in chunks of
+    LOGPROB_CHUNK; the numbers and gradients are those of one unchunked call."""
+    model = tiny_model(seed=3)
+    policy = LMPolicy(model, tokenizer, _verbal_cfg(policy_cfg, confidence_bins=101))
+    d = _manual_decision(policy, ENDINGS[0], n_options=12, action=5)
+    d.conf_bin = 42
+    calls = []                                                              # rows of every full-vocabulary call
+    head = LMPolicy._head
+
+    def spy(model, hidden, rows=None):
+        if rows is None:
+            calls.append(hidden.shape[0])
+        return head(model, hidden, rows)
+
+    monkeypatch.setattr(LMPolicy, "_head", staticmethod(spy))
+
+    def run(chunk):
+        monkeypatch.setattr(LMPolicy, "LOGPROB_CHUNK", chunk, raising=False)
+        calls.clear()
+        with torch.no_grad():
+            out = policy.verbal_forward(model, d, True, range(12))          # all K branches, as in `decide`
+        sampled = list(calls)
+        model.zero_grad()
+        logps, _, log_pc = policy.score_with_confidence(d)                  # one branch, with gradients (training)
+        (logps.sum() + 0.3 * log_pc[42]).backward()
+        return out, sampled, {n: p.grad.clone() for n, p in model.named_parameters()}
+
+    (r1, s1, _, c1), rows_one, g1 = run(10 ** 9)
+    assert len(rows_one) == 1 and rows_one[0] > 12 * 101                   # before the fix: one call with every row
+    (r2, s2, _, c2), rows_chunked, g2 = run(97)
+    assert max(rows_chunked) <= 97 and sum(rows_chunked) == rows_one[0] and len(rows_chunked) > 1
+    torch.testing.assert_close(s2, s1, atol=1e-6, rtol=1e-6)
+    torch.testing.assert_close(c2, c1, atol=1e-6, rtol=1e-6)
+    torch.testing.assert_close(r2, r1, atol=1e-6, rtol=1e-6)
+    for n in g1:
+        torch.testing.assert_close(g2[n], g1[n], atol=1e-6, rtol=1e-5, msg=lambda m, n=n: f"{n}: {m}")
+
+
 def test_verbal_forward_gradients_match_reference(tokenizer, policy_cfg):
     model = tiny_model(seed=2)
     policy = LMPolicy(model, tokenizer, _verbal_cfg(policy_cfg))

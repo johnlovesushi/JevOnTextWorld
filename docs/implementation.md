@@ -289,6 +289,9 @@ $\frac{\hat p+\frac{z^2}{2n}\pm z\sqrt{\frac{\hat p(1-\hat p)}{n}+\frac{z^2}{4n^
   4D 注意力 mask 让每段只看见自己的祖先，位置编号接在父段之后。先用同一个 generator 抽动作，再从
   $\pi^c(\cdot\mid a_t)$ 抽 $m_t$。训练时 `LMPolicy.score_with_confidence` 只对所选的分支打分。
   `confidence_mode="logit"` 时走原来的 `decision_forward`，不多抽任何随机数，结果与改动前逐位相同。
+  段树里所有要打分的 token 位置（选项 + $K\times M$ 个答案）经 `LMPolicy._target_logprobs` 分块（每块
+  `LOGPROB_CHUNK = 1024` 行）过全词表输出层；每行的 log-softmax 只依赖本行，所以数值不变，只是峰值显存不再随
+  $K\times M$ 增长（$M=101$ 时不分块要一次分配 8–10 GB，E0012d/e 因此 OOM）。
 - **评分。** $S(c,z)=1-(c-z)^2$（`rewards.score`）。
 - **共享优势（B 组，`conf_advantage="shared"`）。** 奖励 $R_i=z_i+\lambda b_i$，其中 $b_i$ 用 $c_t$ 代替 $p_t$
   （即 (6) 式里的预测换成采样出的文字置信度），优势 $\widehat A_i$ 同时作用于动作项和置信度项
@@ -379,7 +382,7 @@ $\mathrm{logit}(\text{pred})$ 的逻辑回归（`diagnostics.logistic_fit`，牛
 | `tests/test_t0006.py` | `plain` 的提示词和改动前逐字相同；两种对话格式的提示词快照；每种格式、每种结束方式（`Answer:`、EOS、思考块内外截断、没有推理，共 17 种情形）下的结束类型、后缀和不变式，`decision_forward` 等于朴素参考（1e-4），梯度一致；采样（逐条和 batch）时记录的概率等于打分时的概率，四种结束方式都由采样走到；`collect_batch(parallel=1)` 等于 `run_episode`；`reasoning_end_cap_in_think` 指标；`Config` 的警告 |
 | `tests/test_t0005.py` | 默认配置下 $\ell_j$、$p$、两遍的损失和更新后的参数与改动前的快照逐位相同；三种 `forecast_format` 的序列构造、$\ell_j$ 一致（1e-5）、$s$ 和梯度等于“每个选项一条完整序列”的朴素参考（1e-4）；BCE 的数值和对 logit 的梯度 $p-z$，Brier 的梯度在 $p\to1$ 时消失；`platt_only` 下语言模型的更新与没有校准项时逐位相同；Platt 的数据初始化公式和截断、参数组学习率、预热不作用于 Platt 组、`platt.json` 存取；AUC 等于两两比较的暴力计数；`forecast_brier_const` 按决策加权；forecasts 记录的字段；端到端：`--smoke` 训练并保存 checkpoint，再用 `--model <目录> --batches 0 --save-forecasts` 评测 |
 | `tests/test_t0007.py` | `build_sft_data.py` 在真实 cooking 游戏上的输出与通关路线一致，原始材料能重建两种 `history_mode` 的提示词；SFT 损失等于用 `decision_forward` 的分数手算的交叉熵，也等于 `score()` 的动作项；一步的梯度等于平均损失的梯度，预热的学习率；KeyChest 专家数据上损失下降、准确率上升（第一步不可观测，只能学到多数类）；端到端：`jevtw.sft --smoke` 的 checkpoint 能被 `jevtw.train --model <目录>`（$\beta>0$，第一遍 KL 为 0）和 `final_eval.py` 加载，`summarize_run.py` 能读 SFT 运行并报告未完成 / 非有限损失；Wilson 区间等于手算值；`aggregate_final.py` 的均值、标准差、合并计数 |
-| `tests/test_t0008.py` | 置信度候选答案和提示词；`verbal_forward` 的 $\pi^c$、$s$、$\ell_j$ 及梯度等于朴素参考（每个答案一条完整序列）；采样记录的 $\pi^c$ 等于 `score_with_confidence`；logit 模式不多抽随机数；解耦优势手算值；均值优势；`assign_returns`；共享与解耦两种估计在小 softmax 模型上的期望梯度一致（蒙特卡洛）；命题 2；两种优势下的一步更新；`conf_term_loss` 的梯度和裁剪；解耦模式下动作优势全为 0 时仍训练置信度；`prediction_metrics` 手算值；`logistic_fit`；`verbal_metrics` 和 forecasts 记录；E0012 三组配置的 `--smoke` |
+| `tests/test_t0008.py` | 置信度候选答案和提示词；`verbal_forward` 的 $\pi^c$、$s$、$\ell_j$ 及梯度等于朴素参考（每个答案一条完整序列）；分块输出层（$M=101$）与不分块结果和梯度相同、每次调用的行数不超过块大小；采样记录的 $\pi^c$ 等于 `score_with_confidence`；logit 模式不多抽随机数；解耦优势手算值；均值优势；`assign_returns`；共享与解耦两种估计在小 softmax 模型上的期望梯度一致（蒙特卡洛）；命题 2；两种优势下的一步更新；`conf_term_loss` 的梯度和裁剪；解耦模式下动作优势全为 0 时仍训练置信度；`prediction_metrics` 手算值；`logistic_fit`；`verbal_metrics` 和 forecasts 记录；E0012 三组配置的 `--smoke` |
 | `tests/test_t0010.py` | `build_sft_data.py` 默认跳过多余的 `open`，数据和去掉它的通关路线一致；`--keep-redundant-open` 的输出（jsonl 和 stats）与改动前的脚本（从 git 取出）逐字节相同（假游戏和真实 cooking 游戏）；多个数据文件合并后样本数等于各文件之和、难度标签正确，`jevtw.sft --smoke` 分难度的损失 / 准确率加权后等于总数，单文件时日志没有分难度的键；`torchrun` 两进程与单进程的 SFT 指标一致 |
 | `tests/test_t0009.py` | LPT 分配；单进程时各 helper 是恒等；两个进程（gloo）的一次更新等于单进程（logit、verbal 共享 / 解耦）；`torchrun --nproc-per-node=2 --smoke` 与单进程的指标一致 |
 | `tests/test_policy_trainer.py` | 提示词的历史窗口；KV cache 采样的概率等于打分的概率；共享前缀打分与朴素参考实现的数值、梯度一致（推理的四种结束方式，一位数和两位数选项）；嵌入层和输出层处理的 token 数等于“一次前缀 + 各选项后缀”；动作分布等于对选项的 softmax，`p_options` 等于逐选项读出的 $p_j$；无推理模式；同一组共享初始状态且可复现；第一遍的损失等于公式值（两种归一化）；参数确实被更新；$\lambda=\alpha=\beta=0$ 且全组结果相同时不更新；KL 的检查 |
