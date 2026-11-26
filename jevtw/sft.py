@@ -3,6 +3,8 @@
   python scripts/build_sft_data.py --games data/games_C1/train --out data/sft/C1_train.jsonl
   python -m jevtw.sft --config configs/experiments/<ID>.json --model Qwen/Qwen3-1.7B \
       --train-data data/sft/C1_train.jsonl --val-games data/games_C1/valid --out runs/<ID>
+  # several levels (T0010): the states of all files together, shuffled together
+  python -m jevtw.sft ... --train-data data/sft/C1_train.jsonl data/sft/C3_train.jsonl ...
   # CPU smoke run: tiny random model, byte tokenizer, the KeyChest expert
   python -m jevtw.sft --smoke --out runs/sft_smoke
 
@@ -15,6 +17,11 @@ file serves every history_mode / history_window / prompt_format.
 One optimizer step = `--batch-decisions` states: the gradients of loss / (number of states in the step) are
 accumulated state by state, as `Trainer.step` does, then clipped to GRPOConfig.grad_clip. The learning rate of step
 k (from 1) is lr * min(1, k / ceil(warmup_frac * total steps)), constant afterwards.
+
+Several --train-data files (T0010): every state is labelled with its level, the `level` field of the row if it
+has one, else the file name without `.jsonl` and a trailing `_train` (`data/sft/C3_train.jsonl` -> `C3`); the
+states of all files are pooled and shuffled together, so a step mixes the levels. With more than one level the
+train line also holds sft_loss_<level>, train_acc_<level> and decisions_<level>.
 
 Outputs in --out: config.json, metrics.jsonl (per epoch one train line with sft_loss and train_acc, the means over
 the states as they were visited, and one val line from `train.evaluate`), checkpoints/epochNN/ (model and
@@ -63,6 +70,22 @@ def row_state(row: dict):
 
 def read_rows(path) -> list[dict]:
     return [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
+
+
+def level_label(path) -> str:
+    """`data/sft/C3_train.jsonl` -> `C3`: the file name without `.jsonl` and a trailing `_train`."""
+    name = Path(path).name.removesuffix(".jsonl")
+    return name.removesuffix("_train") or name
+
+
+def read_levels(paths) -> list[dict]:
+    """The rows of every file in order, each with a `level` (its own, else `level_label` of its file)."""
+    rows = []
+    for path in paths:
+        for row in read_rows(path):
+            row.setdefault("level", level_label(path))
+            rows.append(row)
+    return rows
 
 
 def keychest_expert_rows(seeds) -> list[dict]:
@@ -118,8 +141,11 @@ class SFTTrainer:
         self.warmup = warmup_steps(total_steps, warmup_frac)
         self.steps_done = 0
 
-    def step(self, decisions: list[Decision]) -> dict:
-        """One optimizer step on the mean loss of `decisions`."""
+    def step(self, decisions: list[Decision], levels: list[str] | None = None) -> dict:
+        """One optimizer step on the mean loss of `decisions`. With `levels` (one label per decision), the result
+        also holds `by_level` = {label: [loss sum, correct, n]} for the labels in `levels`."""
+        labels = sorted(set(levels)) if levels is not None else []
+        per = {label: [0.0, 0.0, 0] for label in labels}
         factor = lr_factor(self.steps_done + 1, self.warmup)
         for group in self.optimizer.param_groups:
             group["lr"] = self.lr * factor
@@ -127,23 +153,33 @@ class SFTTrainer:
         total, correct = 0.0, 0
         owner = dist_mod.balance([len(d.action_context_ids) + sum(len(o) for o in d.option_ids) for d in decisions],
                                  self.dist.world)
-        for d, r in zip(decisions, owner):
+        for i, (d, r) in enumerate(zip(decisions, owner)):
+            if levels is not None:
+                per[levels[i]][2] += 1                 # every process counts every decision
             if r != self.dist.rank:
                 continue
             loss, hit = sft_loss(self.policy, d)
             (loss / len(decisions)).backward()
             total += float(loss.detach())
             correct += hit
+            if levels is not None:
+                per[levels[i]][0] += float(loss.detach())
+                per[levels[i]][1] += hit
         if self.dist.enabled:
             self.dist.all_reduce_grads(self.params)
-            total, correct = self.dist.sum_floats([total, correct])
-            correct = int(correct)
+            summed = self.dist.sum_floats([total, correct] + [v for label in labels for v in per[label][:2]])
+            total, correct = summed[0], int(summed[1])
+            for k, label in enumerate(labels):
+                per[label][0], per[label][1] = summed[2 + 2 * k], summed[3 + 2 * k]
         grad_norm = float(torch.nn.utils.clip_grad_norm_(self.params, self.grad_clip))
         if math.isfinite(grad_norm):
             self.optimizer.step()
         self.steps_done += 1
-        return {"loss_sum": total, "correct": correct, "n": len(decisions), "grad_norm": grad_norm,
-                "lr": self.lr * factor}
+        out = {"loss_sum": total, "correct": correct, "n": len(decisions), "grad_norm": grad_norm,
+               "lr": self.lr * factor}
+        if levels is not None:
+            out["by_level"] = {label: [per[label][0], int(per[label][1]), per[label][2]] for label in labels}
+        return out
 
 
 def save_checkpoint(directory: Path, model, tokenizer) -> None:
@@ -162,7 +198,8 @@ def main(argv=None):
     ap.add_argument("--model", default="Qwen/Qwen3-1.7B")
     ap.add_argument("--revision")
     ap.add_argument("--tokenizer", help="tokenizer name or directory (default: the same as --model)")
-    ap.add_argument("--train-data", help="jsonl of scripts/build_sft_data.py")
+    ap.add_argument("--train-data", nargs="+", help="jsonl file(s) of scripts/build_sft_data.py; several files "
+                    "are pooled (each state labelled with its level, see above)")
     ap.add_argument("--val-games")
     ap.add_argument("--val-limit", type=int, help="evaluate on the first N validation games only")
     ap.add_argument("--epochs", type=int, default=5)
@@ -200,12 +237,12 @@ def _run(ap, args, dist: dist_mod.Dist):
         ap.error(f"{out} already holds a run")
     model, tokenizer = load(args, cfg)
     if args.smoke:
-        rows = read_rows(args.train_data) if args.train_data else keychest_expert_rows(range(8))
+        rows = read_levels(args.train_data) if args.train_data else keychest_expert_rows(range(8))
         val_games = keychest_games(range(100, 104))
     else:
         if not args.train_data:
             ap.error("--train-data is required unless --smoke")
-        rows = read_rows(args.train_data)
+        rows = read_levels(args.train_data)
         val_games = textworld_games(args.val_games) if args.val_games else []
     if args.val_limit is not None:
         val_games = val_games[:args.val_limit]
@@ -221,6 +258,10 @@ def _run(ap, args, dist: dist_mod.Dist):
     run_config["sft"] = {"states": len(rows), "games": len({r["game"] for r in rows}),
                          "steps_per_epoch": steps_per_epoch, "total_steps": total_steps,
                          "warmup_steps": warmup_steps(total_steps, args.warmup_frac)}
+    levels = sorted({r.get("level") for r in rows if r.get("level") is not None})
+    by_level = len(levels) > 1                 # one level: the log stays as before T0010
+    if levels:
+        run_config["sft"]["levels"] = {label: sum(r.get("level") == label for r in rows) for label in levels}
     metrics_file = None
     if dist.main:
         (out / "config.json").write_text(json.dumps(run_config, indent=2))
@@ -246,18 +287,26 @@ def _run(ap, args, dist: dist_mod.Dist):
         order = list(range(len(rows)))
         rng.shuffle(order)
         loss_sum, correct, norms, lr = 0.0, 0, [], None
+        level_sums = {label: [0.0, 0, 0] for label in levels}
         for i in range(0, len(order), args.batch_decisions):
-            decisions = [expert_decision(policy, *row_state(rows[j])) for j in order[i:i + args.batch_decisions]]
-            stats = trainer.step(decisions)
+            chunk = order[i:i + args.batch_decisions]
+            decisions = [expert_decision(policy, *row_state(rows[j])) for j in chunk]
+            stats = trainer.step(decisions, [rows[j]["level"] for j in chunk] if by_level else None)
+            for label, values in stats.get("by_level", {}).items():
+                level_sums[label] = [a + b for a, b in zip(level_sums[label], values)]
             loss_sum += stats["loss_sum"]
             correct += stats["correct"]
             norms.append(stats["grad_norm"])
             lr = stats["lr"]
         peak = torch.cuda.max_memory_allocated() / 2 ** 30 if torch.cuda.is_available() else None
-        log({"batch": epoch, "epoch": epoch, "split": "train", "sft_loss": loss_sum / len(rows),
-             "train_acc": correct / len(rows), "decisions": len(rows), "steps": trainer.steps_done,
-             "grad_norm": sum(norms) / len(norms), "max_grad_norm": max(norms), "lr": lr,
-             "update_s": round(time.time() - start, 2), "gpu_peak_gb": None if peak is None else round(peak, 2)})
+        record = {"batch": epoch, "epoch": epoch, "split": "train", "sft_loss": loss_sum / len(rows),
+                  "train_acc": correct / len(rows), "decisions": len(rows), "steps": trainer.steps_done,
+                  "grad_norm": sum(norms) / len(norms), "max_grad_norm": max(norms), "lr": lr,
+                  "update_s": round(time.time() - start, 2), "gpu_peak_gb": None if peak is None else round(peak, 2)}
+        if by_level:
+            for label, (ls, c, n) in level_sums.items():
+                record.update({f"sft_loss_{label}": ls / n, f"train_acc_{label}": c / n, f"decisions_{label}": n})
+        log(record)
         if val_games:
             start = time.time()
             result = evaluate(policy, val_games, args.eval_seeds, g.max_actions, g.parallel_episodes, dist=dist)
