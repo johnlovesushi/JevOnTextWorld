@@ -308,6 +308,20 @@ class LMPolicy:
         next-token distribution is needed: full-vocabulary logits for a whole context do not fit on a GPU (E0001)."""
         return torch.log_softmax(cls._head(model, hidden), dim=-1)
 
+    # Rows per output-layer call in `_target_logprobs`: 1024 x 151936 fp32 logits are 0.6 GB (+ the log-softmax).
+    LOGPROB_CHUNK = 1024
+
+    @classmethod
+    def _target_logprobs(cls, model, hidden: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """log p(targets[i] | hidden[i]) per row, i.e. `_logprobs(model, hidden).gather(1, targets[:, None])[:, 0]`,
+        computed LOGPROB_CHUNK rows at a time. Each row's log-softmax depends on that row only, so the numbers are the
+        same; the peak memory no longer grows with the number of rows. `verbal_forward` in the rollout scores K
+        options x M answers: with M = 101 that is ~400 K rows, and the unchunked call needed 8-10 GB at once and ran
+        out of memory (E0012d/e, jobs 8064054 / 8064056 / 8064059)."""
+        c = cls.LOGPROB_CHUNK
+        return torch.cat([cls._logprobs(model, hidden[i:i + c]).gather(1, targets[i:i + c, None])[:, 0]
+                          for i in range(0, hidden.shape[0], c)])
+
     def _sample_reasoning(self, prompt_ids: list[int], generator: torch.Generator) -> tuple[list[int], list[float]]:
         tokens, logps = [], []
         if self.cfg.max_reasoning_tokens <= 0:
@@ -572,8 +586,8 @@ class LMPolicy:
                 positions += [last_u] + [starts[bin_seg[b][m]] + i for i in range(len(y) - 1)]
                 targets += y
                 conf_index += [b * len(self.bin_ids) + m] * len(y)
-        token_lp = self._logprobs(model, hidden[torch.tensor(positions, device=dev)]).gather(
-            1, torch.tensor(targets, device=dev)[:, None])[:, 0]
+        token_lp = self._target_logprobs(model, hidden[torch.tensor(positions, device=dev)],
+                                         torch.tensor(targets, device=dev))
         n_opt = sum(len(o) for o in options)
         reasoning_logps = token_lp[:len(c)]
         row_idx = torch.tensor([j for j, opt in enumerate(options) for _ in opt], device=dev)
