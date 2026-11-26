@@ -12,6 +12,9 @@ FORECAST_FORMATS = ("after_eos", "no_eos", "chat")
 PROMPT_FORMATS = ("plain", "chat_nothink", "chat_think")
 CAL_LOSSES = ("brier", "bce")
 CAL_GRADS = ("full", "platt_only")
+CONFIDENCE_MODES = ("logit", "verbal")
+CONF_ADVANTAGES = ("shared", "decoupled")
+ADV_NORMS = ("std", "mean")
 
 
 @dataclass
@@ -51,6 +54,14 @@ class PolicyConfig:
     chat_no_text: str = "No"
     # Platt scaling: p = sigmoid(a * s + b) with two extra parameters owned by LMPolicy (a = 1, b = 0 at first).
     platt: bool = False
+    # Verbal confidence (T0008). "logit": only the yes / no forecast above. "verbal": after the chosen option
+    # x_t + " j<EOS>" the prompt `verbal_prompt` u is appended and the policy samples one of `confidence_bins` M
+    # answers y^m = " {100 m / (M - 1)}<EOS>" from pi^c = softmax over their summed log-likelihoods (constrained
+    # sampling); c_t = v_m = m / (M - 1) is part of the policy (it has its own likelihood term), never enters the
+    # history. `forecast` (the yes / no logit) can stay on next to it, e.g. for the zero-shot comparison.
+    confidence_mode: str = "logit"
+    confidence_bins: int = 11
+    verbal_prompt: str = "\nConfidence (0-100) that you will complete the objective:"
     # Ignored since T0001 (all options are scored in one suffix batch on a shared prefix); kept so that old
     # configuration files still load.
     option_batch_size: int = 16
@@ -62,6 +73,13 @@ class PolicyConfig:
             raise ValueError(f"prompt_format must be one of {PROMPT_FORMATS}, got {self.prompt_format!r}")
         if self.forecast_format not in FORECAST_FORMATS:
             raise ValueError(f"forecast_format must be one of {FORECAST_FORMATS}, got {self.forecast_format!r}")
+        if self.confidence_mode not in CONFIDENCE_MODES:
+            raise ValueError(f"confidence_mode must be one of {CONFIDENCE_MODES}, got {self.confidence_mode!r}")
+        if self.confidence_bins < 2 or self.confidence_bins > 101:
+            raise ValueError("confidence_bins must be between 2 and 101")
+        if self.confidence_mode == "verbal" and self.forecast and self.forecast_format == "no_eos":
+            raise ValueError('confidence_mode = "verbal" with the yes / no forecast needs forecast_format '
+                             '"after_eos" or "chat"')
 
 
 @dataclass
@@ -97,6 +115,15 @@ class GRPOConfig:
     # detached, so it trains only a and b.
     cal_grad: str = "full"
     platt_lr: float = 1e-2                # learning rate of a and b (own parameter group, no weight decay)
+    # Verbal confidence (T0008, PolicyConfig.confidence_mode = "verbal"). The confidence term
+    # -conf_coef * psi(rho^c, A^c) of every decision is added with the decision's action weight (N counts only the
+    # action terms); the KL covers it too (not scaled by conf_coef).
+    #   "shared"     A^c = the episode's advantage (from R_i = z_i + lam b_i, b_i from the sampled c_t): RLCR;
+    #   "decoupled"  A^c_t = S(c_t, z) - sum_m pi^c_old(m) S(v_m, z) per decision, S(c, z) = 1 - (c - z)^2.
+    conf_advantage: str = "shared"
+    conf_coef: float = 1.0                # kappa
+    # Advantages within a game: "std" = (R - mean) / (sd + delta) (eq. 7), "mean" = R - mean.
+    adv_norm: str = "std"
 
     def __post_init__(self):
         if not 0.0 <= self.lam < 1.0:
@@ -117,6 +144,12 @@ class GRPOConfig:
             raise ValueError("platt_lr must be positive")
         if self.warmup_batches < 0:
             raise ValueError("warmup_batches must be non-negative")
+        if self.conf_advantage not in CONF_ADVANTAGES:
+            raise ValueError(f"conf_advantage must be one of {CONF_ADVANTAGES}, got {self.conf_advantage!r}")
+        if self.adv_norm not in ADV_NORMS:
+            raise ValueError(f"adv_norm must be one of {ADV_NORMS}, got {self.adv_norm!r}")
+        if self.conf_coef < 0:
+            raise ValueError("conf_coef must be non-negative")
         if self.group_size < 2:
             raise ValueError("group_size must be at least 2 for group-relative advantages")
 

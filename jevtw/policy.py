@@ -49,10 +49,38 @@ class Decision:
     reasoning_end: str | None = None
     old_logps: list[float] | None = field(default=None, repr=False)   # filled by the trainer
     ref_logps: list[float] | None = field(default=None, repr=False)
+    # Verbal confidence (T0008, confidence_mode = "verbal"): m_t, log pi^c over the M bins at sampling time
+    # (normalised; after the chosen option) and log pi^c(m_t) at sampling time.
+    conf_bin: int | None = None
+    conf_logps: list[float] | None = None
+    conf_behavior_logp: float | None = None
+    conf_old_logp: float | None = field(default=None, repr=False)     # filled by the trainer
+    conf_ref_logp: float | None = field(default=None, repr=False)
+    conf_adv: float | None = field(default=None, repr=False)          # A^c_t with conf_advantage = "decoupled"
 
     @property
     def n_terms(self) -> int:
         return len(self.reasoning_ids) + 1
+
+    @property
+    def conf(self) -> float | None:
+        """c_t = v_{m_t} = m_t / (M - 1), the sampled (spoken) confidence."""
+        return None if self.conf_bin is None else self.conf_bin / (len(self.conf_logps) - 1)
+
+    @property
+    def conf_mean(self) -> float | None:
+        """c-hat_t = sum_m pi^c(m) v_m, the expected confidence (used for AUC and calibration metrics)."""
+        if self.conf_logps is None:
+            return None
+        m = len(self.conf_logps)
+        return sum(math.exp(lp) * i / (m - 1) for i, lp in enumerate(self.conf_logps))
+
+    @property
+    def conf_entropy(self) -> float | None:
+        """Entropy of pi^c in nats."""
+        if self.conf_logps is None:
+            return None
+        return -sum(math.exp(lp) * lp for lp in self.conf_logps if lp > -math.inf)
 
 
 def build_prompt(objective: str, history: Sequence[tuple[str, Observation]], obs: Observation,
@@ -135,6 +163,17 @@ class LMPolicy:
             device = next(model.parameters()).device
             self.platt_a = torch.nn.Parameter(torch.ones((), dtype=torch.float32, device=device))
             self.platt_b = torch.nn.Parameter(torch.zeros((), dtype=torch.float32, device=device))
+        # Verbal confidence (T0008): the prompt u and the M answers y^m = " {100 m / (M - 1)}<EOS>".
+        self.verbal = cfg.confidence_mode == "verbal"
+        self.verbal_prompt_ids = self.bin_ids = None
+        if self.verbal:
+            self.verbal_prompt_ids = self.encode(cfg.verbal_prompt)
+            m = cfg.confidence_bins
+            self.bin_ids = [self.encode(f" {100 * i / (m - 1):g}") + [self.eos_id] for i in range(m)]
+            if not self.verbal_prompt_ids:
+                raise ValueError("verbal_prompt must not be empty")
+            if len({tuple(b) for b in self.bin_ids}) != m:
+                raise ValueError("the confidence answers do not encode to distinct token sequences")
         # Recent transformers renamed past_key_values to cache (argument and output field).
         params = inspect.signature(model.base_model.forward).parameters
         self._cache_kw = "cache" if "cache" in params else "past_key_values"
@@ -214,11 +253,19 @@ class LMPolicy:
         decision = Decision(command="", action=-1, prompt_ids=prompt_ids, reasoning_ids=reasoning,
                             action_context_ids=context, option_ids=options, behavior_logps=[],
                             reasoning_end=self._finish(reasoning)[2])
-        _, scores, s = self.decision_forward(self.model, decision, forecast=cfg.forecast)
+        if self.verbal:                   # confidence answers after every option; the chosen one is used
+            _, scores, s, conf = self.verbal_forward(self.model, decision, cfg.forecast, range(len(options)))
+        else:
+            _, scores, s = self.decision_forward(self.model, decision, forecast=cfg.forecast)
         log_q = torch.log_softmax(scores, dim=0)
         action = int(torch.multinomial(log_q.exp().to(generator.device), 1, generator=generator))
         decision.command, decision.action = obs.commands[action], action
         decision.behavior_logps = logps + [float(log_q[action])]
+        if self.verbal:                   # m_t ~ pi^c(. | h_t, a_t), drawn after a_t with the episode's generator
+            log_pc = torch.log_softmax(conf[action], dim=0)
+            m = int(torch.multinomial(log_pc.exp().to(generator.device), 1, generator=generator))
+            decision.conf_logps = [float(v) for v in log_pc]
+            decision.conf_bin, decision.conf_behavior_logp = m, decision.conf_logps[m]
         if s is not None:
             decision.confidence_ids = self._forecast_sequence(context, options[action])
             decision.forecast_logits_options = [float(v) for v in s]
@@ -260,6 +307,20 @@ class LMPolicy:
         batched) and training all go through this one function. Only ever called on the few positions whose
         next-token distribution is needed: full-vocabulary logits for a whole context do not fit on a GPU (E0001)."""
         return torch.log_softmax(cls._head(model, hidden), dim=-1)
+
+    # Rows per output-layer call in `_target_logprobs`: 1024 x 151936 fp32 logits are 0.6 GB (+ the log-softmax).
+    LOGPROB_CHUNK = 1024
+
+    @classmethod
+    def _target_logprobs(cls, model, hidden: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """log p(targets[i] | hidden[i]) per row, i.e. `_logprobs(model, hidden).gather(1, targets[:, None])[:, 0]`,
+        computed LOGPROB_CHUNK rows at a time. Each row's log-softmax depends on that row only, so the numbers are the
+        same; the peak memory no longer grows with the number of rows. `verbal_forward` in the rollout scores K
+        options x M answers: with M = 101 that is ~400 K rows, and the unchunked call needed 8-10 GB at once and ran
+        out of memory (E0012d/e, jobs 8064054 / 8064056 / 8064059)."""
+        c = cls.LOGPROB_CHUNK
+        return torch.cat([cls._logprobs(model, hidden[i:i + c]).gather(1, targets[i:i + c, None])[:, 0]
+                          for i in range(0, hidden.shape[0], c)])
 
     def _sample_reasoning(self, prompt_ids: list[int], generator: torch.Generator) -> tuple[list[int], list[float]]:
         tokens, logps = [], []
@@ -445,6 +506,111 @@ class LMPolicy:
             yes_no = self._head(model, hidden[last], rows=[self.yes_id, self.no_id])
             s = yes_no[:, 0] - yes_no[:, 1]
         return reasoning_logps, scores, s
+
+    def verbal_forward(self, model, d: Decision, forecast: bool, branches: Sequence[int]
+                       ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor]:
+        """`decision_forward` plus the verbal confidence (T0008), again from one forward over a folded tree.
+
+        Returns (reasoning_logps, option_scores (K,), s (K,) or None, conf (len(branches), M)) with
+        conf[b, m] = l^c(m | h_t, a^{branches[b]}) = sum_k log pi(y^m_k | x + y^j + u + y^m_<k), unnormalised
+        (pi^c = softmax over m). Segments after the prefix x[0:n-1], each seeing the prefix, its ancestors and
+        itself (causally), with positions continuing from its parent:
+          r_j = (x[n-1]) + y^j                   every option (parent: prefix)
+          f_j = forecast question               when `forecast` (parent r_j): s is read at its last token
+          u_j = u                               for j in `branches` (parent r_j)
+          y_{j,m} = y^m[:-1]                    every answer m (parent u_j); its first token is predicted at the
+                                                last token of u_j, token k at token k - 1 of y_{j,m}
+        so every token has exactly the context and position of the separate sequence x + y^j (+ u + y^m).
+        Option scores and s equal those of `decision_forward` (up to floating point: the layout differs)."""
+        x, c, options = d.action_context_ids, d.reasoning_ids, d.option_ids
+        n, n_prompt, k = len(x), len(d.prompt_ids), len(options)
+        assert n >= 2 and n_prompt >= 1 and n_prompt + len(c) <= n, (n_prompt, len(c), n)
+        assert x[:n_prompt + max(len(c) - 1, 0)] == d.prompt_ids + c[:max(len(c) - 1, 0)]
+        assert self.verbal, 'verbal_forward needs confidence_mode = "verbal"'
+        if forecast and self.cfg.forecast_format == "no_eos":
+            raise ValueError('the verbal forward supports forecast_format "after_eos" and "chat" only')
+        branches = list(branches)
+        segs: list[tuple[list[int], int]] = [([x[n - 1]] + opt, -1) for opt in options]   # (tokens, parent)
+        tail_seg = []
+        if forecast:
+            for j in range(k):
+                tail_seg.append(len(segs))
+                segs.append((self.forecast_tail_ids, j))
+        u_seg, bin_seg = [], []
+        for j in branches:
+            u_seg.append(len(segs))
+            segs.append((self.verbal_prompt_ids, j))
+            row = []
+            for y in self.bin_ids:
+                row.append(len(segs) if len(y) > 1 else None)
+                if len(y) > 1:
+                    segs.append((y[:-1], u_seg[-1]))
+            bin_seg.append(row)
+        starts, pos0, total = [], [], n - 1          # folded index and position of every segment's first token
+        for tokens, parent in segs:
+            starts.append(total)
+            pos0.append(n - 1 if parent < 0 else pos0[parent] + len(segs[parent][0]))
+            total += len(tokens)
+        dev = self.device
+        ids = self._tensor(x[:n - 1] + [t for tokens, _ in segs for t in tokens])
+        position_ids = torch.cat([torch.arange(n - 1, device=dev)]
+                                 + [torch.arange(p, p + len(tokens), device=dev)
+                                    for (tokens, _), p in zip(segs, pos0)])[None]
+        # ancestor-or-self table over segment ids (0 = prefix, s + 1 = segs[s])
+        n_seg = len(segs) + 1
+        anc = torch.zeros(n_seg, n_seg, dtype=torch.bool)
+        anc[:, 0] = True
+        for s_id, (_, parent) in enumerate(segs):
+            row = anc[parent + 1].clone() if parent >= 0 else anc[0].clone()
+            row[s_id + 1] = True
+            anc[s_id + 1] = row
+        anc = anc.to(dev)
+        segment = torch.cat([torch.zeros(n - 1, dtype=torch.long, device=dev)]
+                            + [torch.full((len(tokens),), s_id + 1, device=dev) for s_id, (tokens, _) in enumerate(segs)])
+        allowed = torch.ones(total, total, dtype=torch.bool, device=dev).tril()
+        allowed &= anc[segment[:, None], segment[None, :]]
+        dtype = next(model.parameters()).dtype
+        mask = torch.zeros(total, total, dtype=dtype, device=dev).masked_fill(~allowed, torch.finfo(dtype).min)
+        hidden = model.base_model(input_ids=ids, attention_mask=mask[None, None], position_ids=position_ids,
+                                  use_cache=False).last_hidden_state[0]
+
+        positions = list(range(n_prompt - 1, n_prompt + len(c) - 1))
+        targets = list(c)
+        for j, opt in enumerate(options):
+            positions += [starts[j] + i for i in range(len(opt))]
+            targets += opt
+        conf_index = []                               # (branch b, bin m) of every confidence token
+        for b, j in enumerate(branches):
+            last_u = starts[u_seg[b]] + len(self.verbal_prompt_ids) - 1
+            for m, y in enumerate(self.bin_ids):
+                positions += [last_u] + [starts[bin_seg[b][m]] + i for i in range(len(y) - 1)]
+                targets += y
+                conf_index += [b * len(self.bin_ids) + m] * len(y)
+        token_lp = self._target_logprobs(model, hidden[torch.tensor(positions, device=dev)],
+                                         torch.tensor(targets, device=dev))
+        n_opt = sum(len(o) for o in options)
+        reasoning_logps = token_lp[:len(c)]
+        row_idx = torch.tensor([j for j, opt in enumerate(options) for _ in opt], device=dev)
+        scores = torch.zeros(k, device=dev, dtype=token_lp.dtype).index_add(0, row_idx, token_lp[len(c):len(c) + n_opt])
+        conf = torch.zeros(len(branches) * len(self.bin_ids), device=dev, dtype=token_lp.dtype).index_add(
+            0, torch.tensor(conf_index, device=dev, dtype=torch.long), token_lp[len(c) + n_opt:])
+        conf = conf.view(len(branches), len(self.bin_ids))
+        s = None
+        if forecast:
+            last = torch.tensor([starts[tail_seg[j]] + len(self.forecast_tail_ids) - 1 for j in range(k)], device=dev)
+            yes_no = self._head(model, hidden[last], rows=[self.yes_id, self.no_id])
+            s = yes_no[:, 0] - yes_no[:, 1]
+        return reasoning_logps, scores, s, conf
+
+    def score_with_confidence(self, d: Decision, model=None, forecast: bool = False
+                              ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor]:
+        """`score` plus log pi^c (M,) after the chosen option (verbal mode): one `verbal_forward` with only the
+        chosen option's confidence branch."""
+        model = self.model if model is None else model
+        reasoning_logps, scores, s, conf = self.verbal_forward(model, d, forecast, [d.action])
+        log_q = torch.log_softmax(scores, dim=0)
+        logps = torch.cat([reasoning_logps, log_q[d.action:d.action + 1]])
+        return logps, (s[d.action] if s is not None else None), torch.log_softmax(conf[0], dim=0)
 
     def score(self, d: Decision, model=None, forecast: bool = False) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Log-probabilities of the decision's |c_t| + 1 terms under `model` (default: the policy), plus the

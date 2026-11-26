@@ -16,9 +16,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from final_eval import FORECAST_KEYS, wilson  # noqa: E402
+from final_eval import CALIB_KEYS, FORECAST_KEYS, wilson  # noqa: E402
 
-KEYS = ("win_rate", "mean_length", *FORECAST_KEYS)
+KEYS = ("win_rate", "mean_length", *FORECAST_KEYS, *CALIB_KEYS)
 
 
 def mean_std(values: list[float]) -> tuple[float | None, float | None]:
@@ -55,17 +55,18 @@ def _f(x, digits=4):
 
 
 def markdown(result: dict) -> str:
-    head = ["run", "wins", *KEYS, "Wilson 95%"]
+    keys = [k for k in KEYS if k not in CALIB_KEYS or result["stats"][k]["n"]]   # CALIB_KEYS only when present
+    head = ["run", "wins", *keys, "Wilson 95%"]
     lines = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
     for name, r in result["runs"].items():
         ci = r.get("wilson95")
-        lines.append("| " + " | ".join([name, f'{r["wins"]}/{r["episodes"]}', *[_f(r[k]) for k in KEYS],
+        lines.append("| " + " | ".join([name, f'{r["wins"]}/{r["episodes"]}', *[_f(r[k]) for k in keys],
                                         "–" if not ci else f"[{ci[0]:.3f}, {ci[1]:.3f}]"]) + " |")
     pooled = result["pooled"]
     lines.append("| mean | " + f'{pooled["wins"]}/{pooled["episodes"]} | '
-                 + " | ".join(_f(result["stats"][k]["mean"]) for k in KEYS)
+                 + " | ".join(_f(result["stats"][k]["mean"]) for k in keys)
                  + f' | [{pooled["wilson95"][0]:.3f}, {pooled["wilson95"][1]:.3f}] (pooled) |')
-    lines.append("| std | | " + " | ".join(_f(result["stats"][k]["std"]) for k in KEYS) + " | |")
+    lines.append("| std | | " + " | ".join(_f(result["stats"][k]["std"]) for k in keys) + " | |")
     return "\n".join(lines)
 
 

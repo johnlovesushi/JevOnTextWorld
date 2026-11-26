@@ -1,0 +1,314 @@
+{
+ "runs": {
+  "s17": {
+   "episodes": 80,
+   "wins": 0,
+   "wilson95": [
+    0.0,
+    0.0458181295355271
+   ],
+   "seeds": [
+    17,
+    23
+   ],
+   "win_rate": 0.0,
+   "mean_length": 8.625,
+   "forecast_auc": null,
+   "forecast_auc_t0": null,
+   "forecast_brier": null,
+   "forecast_brier_const": null,
+   "forecast_offset": null,
+   "forecast_logloss": null,
+   "forecast_ece": null,
+   "forecast_auc_within": null,
+   "forecast_auc_t_only": null,
+   "forecast_auc_t_plus": null,
+   "forecast_auc_step_gain": null,
+   "forecast_saturation": null,
+   "conf_brier": 0.6063422322115851,
+   "conf_brier_sampled": 0.5894927536231884,
+   "conf_brier_const": 0.0,
+   "mean_conf_hat": 0.7771160545981266,
+   "mean_conf": 0.7555072463768115,
+   "conf_auc": null,
+   "conf_auc_t0": null,
+   "conf_entropy": 1.1822654626513285,
+   "conf_saturation_sampled": 0.08840579710144927,
+   "conf_offset": 0.7771160545981266,
+   "conf_logloss": 1.52880534251651,
+   "conf_ece": 0.7771160545981267,
+   "conf_auc_within": null,
+   "conf_auc_t_only": null,
+   "conf_auc_t_plus": null,
+   "conf_auc_step_gain": null,
+   "conf_saturation": 0.0
+  },
+  "s23": {
+   "episodes": 80,
+   "wins": 0,
+   "wilson95": [
+    0.0,
+    0.0458181295355271
+   ],
+   "seeds": [
+    17,
+    23
+   ],
+   "win_rate": 0.0,
+   "mean_length": 8.075,
+   "forecast_auc": null,
+   "forecast_auc_t0": null,
+   "forecast_brier": null,
+   "forecast_brier_const": null,
+   "forecast_offset": null,
+   "forecast_logloss": null,
+   "forecast_ece": null,
+   "forecast_auc_within": null,
+   "forecast_auc_t_only": null,
+   "forecast_auc_t_plus": null,
+   "forecast_auc_step_gain": null,
+   "forecast_saturation": null,
+   "conf_brier": 0.5670145208679367,
+   "conf_brier_sampled": 0.5526315789473685,
+   "conf_brier_const": 0.0,
+   "mean_conf_hat": 0.7515797108156158,
+   "mean_conf": 0.731578947368421,
+   "conf_auc": null,
+   "conf_auc_t0": null,
+   "conf_entropy": 1.0915938239848204,
+   "conf_saturation_sampled": 0.047987616099071206,
+   "conf_offset": 0.7515797108156158,
+   "conf_logloss": 1.4126369011160411,
+   "conf_ece": 0.7515797108156159,
+   "conf_auc_within": null,
+   "conf_auc_t_only": null,
+   "conf_auc_t_plus": null,
+   "conf_auc_step_gain": null,
+   "conf_saturation": 0.0
+  },
+  "s29": {
+   "episodes": 80,
+   "wins": 0,
+   "wilson95": [
+    0.0,
+    0.0458181295355271
+   ],
+   "seeds": [
+    17,
+    23
+   ],
+   "win_rate": 0.0,
+   "mean_length": 9.1125,
+   "forecast_auc": null,
+   "forecast_auc_t0": null,
+   "forecast_brier": null,
+   "forecast_brier_const": null,
+   "forecast_offset": null,
+   "forecast_logloss": null,
+   "forecast_ece": null,
+   "forecast_auc_within": null,
+   "forecast_auc_t_only": null,
+   "forecast_auc_t_plus": null,
+   "forecast_auc_step_gain": null,
+   "forecast_saturation": null,
+   "conf_brier": 0.5657034926034467,
+   "conf_brier_sampled": 0.5518244170096022,
+   "conf_brier_const": 0.0,
+   "mean_conf_hat": 0.7507396935046706,
+   "mean_conf": 0.7325102880658436,
+   "conf_auc": null,
+   "conf_auc_t0": null,
+   "conf_entropy": 1.0511644047922197,
+   "conf_saturation_sampled": 0.053497942386831275,
+   "conf_offset": 0.7507396935046706,
+   "conf_logloss": 1.4085724136144162,
+   "conf_ece": 0.7507396935046706,
+   "conf_auc_within": null,
+   "conf_auc_t_only": null,
+   "conf_auc_t_plus": null,
+   "conf_auc_step_gain": null,
+   "conf_saturation": 0.0
+  }
+ },
+ "stats": {
+  "win_rate": {
+   "mean": 0.0,
+   "std": 0.0,
+   "n": 3
+  },
+  "mean_length": {
+   "mean": 8.604166666666666,
+   "std": 0.5190636601933659,
+   "n": 3
+  },
+  "forecast_auc": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_auc_t0": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_brier": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_brier_const": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_offset": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_logloss": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_ece": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_auc_within": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_auc_t_only": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_auc_t_plus": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_auc_step_gain": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_saturation": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "conf_brier": {
+   "mean": 0.5796867485609895,
+   "std": 0.023093631270611193,
+   "n": 3
+  },
+  "conf_brier_sampled": {
+   "mean": 0.5646495831933863,
+   "std": 0.021518601612362933,
+   "n": 3
+  },
+  "conf_brier_const": {
+   "mean": 0.0,
+   "std": 0.0,
+   "n": 3
+  },
+  "mean_conf_hat": {
+   "mean": 0.759811819639471,
+   "std": 0.014991791684083013,
+   "n": 3
+  },
+  "mean_conf": {
+   "mean": 0.7398654939370254,
+   "std": 0.013554156683996838,
+   "n": 3
+  },
+  "conf_auc": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "conf_auc_t0": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "conf_entropy": {
+   "mean": 1.1083412304761229,
+   "std": 0.06713589621866259,
+   "n": 3
+  },
+  "conf_saturation_sampled": {
+   "mean": 0.06329711852911725,
+   "std": 0.021918604624517248,
+   "n": 3
+  },
+  "conf_offset": {
+   "mean": 0.759811819639471,
+   "std": 0.014991791684083013,
+   "n": 3
+  },
+  "conf_logloss": {
+   "mean": 1.450004885748989,
+   "std": 0.06827345021851587,
+   "n": 3
+  },
+  "conf_ece": {
+   "mean": 0.759811819639471,
+   "std": 0.014991791684083046,
+   "n": 3
+  },
+  "conf_auc_within": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "conf_auc_t_only": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "conf_auc_t_plus": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "conf_auc_step_gain": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "conf_saturation": {
+   "mean": 0.0,
+   "std": 0.0,
+   "n": 3
+  }
+ },
+ "pooled": {
+  "wins": 0,
+  "episodes": 240,
+  "win_rate": 0.0,
+  "wilson95": [
+   0.0,
+   0.015753919941558815
+  ]
+ },
+ "action_types": {
+  "take": 644,
+  "cook": 405,
+  "examine": 248,
+  "drop": 188,
+  "prepare": 170,
+  "open": 152,
+  "chop": 104,
+  "dice": 58,
+  "slice": 46,
+  "close": 26,
+  "put": 22,
+  "eat": 1,
+  "insert": 1
+ }
+}

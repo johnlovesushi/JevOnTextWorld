@@ -15,7 +15,9 @@ Outputs in --out (which must not hold a summary yet):
                   configuration and the code version
   episodes.jsonl  one line per episode in the --save-forecasts format (game, env_seed, sample_seed, z, length,
                   steps: t, command, s, p, s_options)
-A checkpoint directory with platt.json turns Platt scaling on and loads a, b, like jevtw.train."""
+A checkpoint directory with platt.json turns Platt scaling on and loads a, b, like jevtw.train.
+Several GPUs (T0009): `torchrun --standalone --nproc-per-node=2 scripts/final_eval.py ...` splits the episodes over
+the processes (same episodes and seeds as one process); only process 0 writes."""
 import argparse
 import json
 import math
@@ -30,6 +32,11 @@ sys.path.insert(0, str(ROOT))
 SEEDS = (101, 102, 103)
 Z95 = 1.959963984540054
 FORECAST_KEYS = ("forecast_auc", "forecast_auc_t0", "forecast_brier", "forecast_brier_const")
+# E0012 section 6: the same diagnostics for p_t (forecast_) and for the verbal confidence c-hat (conf_)
+PRED_KEYS = ("offset", "logloss", "ece", "auc_within", "auc_t_only", "auc_t_plus", "auc_step_gain", "saturation")
+CALIB_KEYS = (*(f"forecast_{k}" for k in PRED_KEYS),
+              "conf_brier", "conf_brier_sampled", "conf_brier_const", "mean_conf_hat", "mean_conf", "conf_auc",
+              "conf_auc_t0", "conf_entropy", "conf_saturation_sampled", *(f"conf_{k}" for k in PRED_KEYS))
 
 
 def wilson(wins: int, n: int, z: float = Z95) -> list[float]:
@@ -49,13 +56,14 @@ def summarize(records: list[dict], metrics: dict) -> dict:
     out = {"episodes": n, "wins": wins, "win_rate": wins / n, "wilson95": wilson(wins, n),
            "mean_length": sum(r["length"] for r in records) / n, "games": len({r["game"] for r in records}),
            "action_types": dict(types.most_common())}
-    out.update({k: metrics[k] for k in FORECAST_KEYS if metrics.get(k) is not None})
+    out.update({k: metrics[k] for k in FORECAST_KEYS + CALIB_KEYS if metrics.get(k) is not None})
     return out
 
 
 def main(argv=None) -> int:
     import torch
 
+    from jevtw import dist as dist_mod
     from jevtw.config import Config
     from jevtw.policy import PLATT_FILE, LMPolicy
     from jevtw.train import evaluate, keychest_games, load, run_metadata, textworld_games
@@ -85,25 +93,35 @@ def main(argv=None) -> int:
     if platt_file.is_file() and not cfg.policy.platt:
         print(f"{platt_file} found: turning PolicyConfig.platt on", flush=True)
         cfg.policy.platt = True
+    dist = dist_mod.setup()               # before loading: process r puts the model on cuda:r
     model, tokenizer = load(args, cfg)
     games = keychest_games(range(200, 204)) if args.smoke else textworld_games(args.games)
     policy = LMPolicy(model, tokenizer, cfg.policy)
     if policy.load_platt(args.model):
         print(f"loaded Platt parameters a = {float(policy.platt_a):.6g}, b = {float(policy.platt_b):.6g}", flush=True)
 
-    out.mkdir(parents=True, exist_ok=True)
-    torch.manual_seed(args.seed)
-    start = time.time()
-    metrics = evaluate(policy, games, args.seeds, cfg.grpo.max_actions, cfg.grpo.parallel_episodes,
-                       forecasts_path=out / "episodes.jsonl")
+    try:
+        if dist.main:
+            out.mkdir(parents=True, exist_ok=True)
+        torch.manual_seed(args.seed)
+        start = time.time()
+        metrics = evaluate(policy, games, args.seeds, cfg.grpo.max_actions, cfg.grpo.parallel_episodes,
+                           forecasts_path=out / "episodes.jsonl", dist=dist)
+        if dist.main:
+            write_summary(out, args, cfg, metrics, start, run_metadata)
+    finally:
+        dist_mod.teardown()
+    return 0
+
+
+def write_summary(out, args, cfg, metrics, start, run_metadata):
     records = [json.loads(line) for line in (out / "episodes.jsonl").read_text().splitlines() if line.strip()]
     summary = {**summarize(records, metrics), "seeds": args.seeds, "eval_s": round(time.time() - start, 2),
                "gpu_peak_gb": metrics.get("gpu_peak_gb"), **run_metadata(cfg, args)}
     (out / "summary.json").write_text(json.dumps(summary, indent=1) + "\n")
     print(json.dumps({k: summary[k] for k in ("episodes", "wins", "win_rate", "wilson95", "mean_length",
-                                              "action_types", *[f for f in FORECAST_KEYS if f in summary])}, indent=1))
+                                              "action_types", *[f for f in FORECAST_KEYS + CALIB_KEYS if f in summary])}, indent=1))
     print(f"wrote {out / 'summary.json'}")
-    return 0
 
 
 if __name__ == "__main__":

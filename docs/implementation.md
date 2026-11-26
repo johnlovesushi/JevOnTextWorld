@@ -267,6 +267,50 @@ $\frac{\hat p+\frac{z^2}{2n}\pm z\sqrt{\frac{\hat p(1-\hat p)}{n}+\frac{z^2}{4n^
 标准差（样本标准差，分母 $n-1$），以及把赢的局数和回合数加总后的 Wilson 区间（忽略了各种子是不同的模型）。
 测试集只在 issue 明确要求“最终评测”时使用，不能用来选 checkpoint 或超参数。
 
+### 文字置信度（RLCR 式，T0008）
+
+`policy.confidence_mode = "verbal"` 时，智能体在选出动作之后用文字说出一个置信度，取代 logit 读出 $p_t$ 作为奖励里的预测。
+
+- **序列。** 在 $x$（提示词，含推理）+ $y^{a_t}$（所选选项的后缀 ` j<EOS>`）后面接 $u$ = `policy.verbal_prompt`
+  （默认 `"\nConfidence (0-100) that you will complete the objective:"`），再接 $M$ 个候选答案之一
+  $y^m$ = ` {v_m*100:g}<EOS>`，$v_m=m/(M-1)$，$m=0..M-1$（`confidence_bins`，默认 $M=11$：` 0`、` 10`…` 100`）。
+  答案是**受约束采样**：$\pi^c_\theta(m\mid x,a)=\mathrm{softmax}_m \sum_i \log\pi_\theta(y^m_i\mid\cdot)$，
+  $m_t\sim\pi^c$，$c_t=v_{m_t}$，$\hat c_t=\sum_m\pi^c(m)v_m$（期望置信度，用于诊断）。
+- **前向。** 采样时动作还没定，所以 `LMPolicy.verbal_forward` 一次前向算出全部 $K$ 个选项各自的 $\pi^c$：
+  它把共享前缀打分推广成一棵段树（共享前缀 → 每个选项的 `r_j` → 预测尾 `f_j`、`u_j` → $M$ 个答案段），
+  4D 注意力 mask 让每段只看见自己的祖先，位置编号接在父段之后。先用同一个 generator 抽动作，再从
+  $\pi^c(\cdot\mid a_t)$ 抽 $m_t$。训练时 `LMPolicy.score_with_confidence` 只对所选的分支打分。
+  `confidence_mode="logit"` 时走原来的 `decision_forward`，不多抽任何随机数，结果与改动前逐位相同。
+  段树里所有要打分的 token 位置（选项 + $K\times M$ 个答案）经 `LMPolicy._target_logprobs` 分块（每块
+  `LOGPROB_CHUNK = 1024` 行）过全词表输出层；每行的 log-softmax 只依赖本行，所以数值不变，只是峰值显存不再随
+  $K\times M$ 增长（$M=101$ 时不分块要一次分配 8–10 GB，E0012d/e 因此 OOM）。
+- **评分。** $S(c,z)=1-(c-z)^2$（`rewards.score`）。
+- **共享优势（B 组，`conf_advantage="shared"`）。** 奖励 $R_i=z_i+\lambda b_i$，其中 $b_i$ 用 $c_t$ 代替 $p_t$
+  （即 (6) 式里的预测换成采样出的文字置信度），优势 $\widehat A_i$ 同时作用于动作项和置信度项
+  $\log\pi^c(m_t)$。
+- **解耦优势（C 组，`conf_advantage="decoupled"`）。** 动作只用 $z$ 的优势；置信度项每个决策有自己的优势
+  $\widehat A^c_t=S(c_t,z)-\sum_m\pi^c_\text{old}(m)S(v_m,z)$（`rewards.decoupled_conf_advantage`）。
+  基线是 $S$ 在 $\pi^c_\text{old}$ 下的期望，不依赖 $m_t$，所以估计无偏；$\pi^c_\text{old}$ 用采样时记录的
+  `conf_logps`（与重算的 $\theta_\text{old}$ 相同，差别由 `sampling_vs_old_max_abs_logp_diff` 监控）。
+- **损失。** 置信度项（`losses.conf_term_loss`）$=w\cdot\kappa\cdot\text{clip-surrogate}(\rho^c,\widehat A^c)
+  +\beta w\,\mathrm{k3}(\pi^c,\pi^c_\text{ref})$，$w$ 是该决策动作项的权重，$\kappa$ = `grpo.conf_coef`
+  （B 组 1.0，C 组 0.3），KL 项不乘 $\kappa$。$\rho^c=\pi^c_\theta(m_t)/\pi^c_\text{old}(m_t)$，裁剪同 (8)。
+  pass 记录里另有 `conf_loss`、`conf_clip_frac`、`conf_kl`；`kl` 仍只算动作项。
+- **均值优势。** `grpo.adv_norm="mean"` 时 $\widehat A_i=R_i-\bar R$（不除以标准差，避免第 3 节第 1 条的放大）；
+  默认 `"std"` 即 (7) 式。
+- **不支持的组合。** verbal + TIS（`tis_cap`）报错；verbal + `forecast_format="no_eos"` 报错。
+
+**诊断（E0012 第 6 节，`diagnostics.prediction_metrics`）。** 对 $p_t$（前缀 `forecast_`）和 $\hat c_t$（前缀 `conf_`）
+都算：offset $=\lvert\overline{\text{pred}}-\bar z\rvert$；log loss（预测截断到 $[0.01,0.99]$）；ECE（10 个等宽区间）；
+局内 AUC（同一局里有赢有输时，按局平均的 AUC）；步数调整 AUC：只用 $t$ 的逻辑回归 vs 用 $t$ 和
+$\mathrm{logit}(\text{pred})$ 的逻辑回归（`diagnostics.logistic_fit`，牛顿法，小岭项）的 AUC 之差；
+饱和比例（$\le0.005$ 或 $\ge0.995$）。`diagnostics.verbal_metrics` 另给 $\hat c$ 和 $c$ 的 Brier、常数预测的 Brier、
+平均 $\pi^c$ 熵（nats）、$c\in\{0,1\}$ 的比例。`final_eval.py` 的 `summary.json` 收录这些键（`CALIB_KEYS`）。
+
+**多卡（T0009）。** `torchrun --nproc-per-node=N`：每个进程负责一部分回合，用 `all_gather_object` 汇总；
+更新时按代价（token 数）用 LPT 把决策分给各进程，梯度求和后 all-reduce，所以 N 个进程的一次更新等于
+单进程的一次更新（浮点求和顺序除外）。只有 rank 0 写日志和 checkpoint。
+
 ## 3. 需要注意的地方
 
 1. **$\lambda>0$ 时，全输的组也会产生满量级的优势。** 笔记保证了“任何一局赢都比任何一局输好”，
@@ -330,4 +374,6 @@ $\frac{\hat p+\frac{z^2}{2n}\pm z\sqrt{\frac{\hat p(1-\hat p)}{n}+\frac{z^2}{4n^
 | `tests/test_t0006.py` | `plain` 的提示词和改动前逐字相同；两种对话格式的提示词快照；每种格式、每种结束方式（`Answer:`、EOS、思考块内外截断、没有推理，共 17 种情形）下的结束类型、后缀和不变式，`decision_forward` 等于朴素参考（1e-4），梯度一致；采样（逐条和 batch）时记录的概率等于打分时的概率，四种结束方式都由采样走到；`collect_batch(parallel=1)` 等于 `run_episode`；`reasoning_end_cap_in_think` 指标；`Config` 的警告 |
 | `tests/test_t0005.py` | 默认配置下 $\ell_j$、$p$、两遍的损失和更新后的参数与改动前的快照逐位相同；三种 `forecast_format` 的序列构造、$\ell_j$ 一致（1e-5）、$s$ 和梯度等于“每个选项一条完整序列”的朴素参考（1e-4）；BCE 的数值和对 logit 的梯度 $p-z$，Brier 的梯度在 $p\to1$ 时消失；`platt_only` 下语言模型的更新与没有校准项时逐位相同；Platt 的数据初始化公式和截断、参数组学习率、预热不作用于 Platt 组、`platt.json` 存取；AUC 等于两两比较的暴力计数；`forecast_brier_const` 按决策加权；forecasts 记录的字段；端到端：`--smoke` 训练并保存 checkpoint，再用 `--model <目录> --batches 0 --save-forecasts` 评测 |
 | `tests/test_t0007.py` | `build_sft_data.py` 在真实 cooking 游戏上的输出与通关路线一致，原始材料能重建两种 `history_mode` 的提示词；SFT 损失等于用 `decision_forward` 的分数手算的交叉熵，也等于 `score()` 的动作项；一步的梯度等于平均损失的梯度，预热的学习率；KeyChest 专家数据上损失下降、准确率上升（第一步不可观测，只能学到多数类）；端到端：`jevtw.sft --smoke` 的 checkpoint 能被 `jevtw.train --model <目录>`（$\beta>0$，第一遍 KL 为 0）和 `final_eval.py` 加载，`summarize_run.py` 能读 SFT 运行并报告未完成 / 非有限损失；Wilson 区间等于手算值；`aggregate_final.py` 的均值、标准差、合并计数 |
+| `tests/test_t0008.py` | 置信度候选答案和提示词；`verbal_forward` 的 $\pi^c$、$s$、$\ell_j$ 及梯度等于朴素参考（每个答案一条完整序列）；分块输出层（$M=101$）与不分块结果和梯度相同、每次调用的行数不超过块大小；采样记录的 $\pi^c$ 等于 `score_with_confidence`；logit 模式不多抽随机数；解耦优势手算值；均值优势；`assign_returns`；共享与解耦两种估计在小 softmax 模型上的期望梯度一致（蒙特卡洛）；命题 2；两种优势下的一步更新；`conf_term_loss` 的梯度和裁剪；解耦模式下动作优势全为 0 时仍训练置信度；`prediction_metrics` 手算值；`logistic_fit`；`verbal_metrics` 和 forecasts 记录；E0012 三组配置的 `--smoke` |
+| `tests/test_t0009.py` | LPT 分配；单进程时各 helper 是恒等；两个进程（gloo）的一次更新等于单进程（logit、verbal 共享 / 解耦）；`torchrun --nproc-per-node=2 --smoke` 与单进程的指标一致 |
 | `tests/test_policy_trainer.py` | 提示词的历史窗口；KV cache 采样的概率等于打分的概率；共享前缀打分与朴素参考实现的数值、梯度一致（推理的四种结束方式，一位数和两位数选项）；嵌入层和输出层处理的 token 数等于“一次前缀 + 各选项后缀”；动作分布等于对选项的 softmax，`p_options` 等于逐选项读出的 $p_j$；无推理模式；同一组共享初始状态且可复现；第一遍的损失等于公式值（两种归一化）；参数确实被更新；$\lambda=\alpha=\beta=0$ 且全组结果相同时不更新；KL 的检查 |

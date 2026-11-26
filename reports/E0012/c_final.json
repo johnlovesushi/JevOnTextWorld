@@ -1,0 +1,317 @@
+{
+ "runs": {
+  "s17": {
+   "episodes": 120,
+   "wins": 83,
+   "wilson95": [
+    0.6041700227619933,
+    0.767272630110837
+   ],
+   "seeds": [
+    101,
+    102,
+    103
+   ],
+   "win_rate": 0.6916666666666667,
+   "mean_length": 15.483333333333333,
+   "forecast_auc": null,
+   "forecast_auc_t0": null,
+   "forecast_brier": null,
+   "forecast_brier_const": null,
+   "forecast_offset": null,
+   "forecast_logloss": null,
+   "forecast_ece": null,
+   "forecast_auc_within": null,
+   "forecast_auc_t_only": null,
+   "forecast_auc_t_plus": null,
+   "forecast_auc_step_gain": null,
+   "forecast_saturation": null,
+   "conf_brier": 0.22523639540396406,
+   "conf_brier_sampled": 0.26174919268030145,
+   "conf_brier_const": 0.245104519947488,
+   "mean_conf_hat": 0.7023945561885478,
+   "mean_conf": 0.7154467168998924,
+   "conf_auc": 0.7789877809963115,
+   "conf_auc_t0": 0.6292738521654184,
+   "conf_entropy": 1.4618519116455022,
+   "conf_saturation_sampled": 0.09741657696447793,
+   "conf_offset": 0.13242684897649182,
+   "conf_logloss": 0.6403190626353265,
+   "conf_ece": 0.13274941118185632,
+   "conf_auc_within": 0.5713434868710638,
+   "conf_auc_t_only": 0.6887995026833589,
+   "conf_auc_t_plus": 0.7919336139012292,
+   "conf_auc_step_gain": 0.1031341112178703,
+   "conf_saturation": 0.0
+  },
+  "s23": {
+   "episodes": 120,
+   "wins": 82,
+   "wilson95": [
+    0.5955213183551313,
+    0.7597716539580108
+   ],
+   "seeds": [
+    101,
+    102,
+    103
+   ],
+   "win_rate": 0.6833333333333333,
+   "mean_length": 15.766666666666667,
+   "forecast_auc": null,
+   "forecast_auc_t0": null,
+   "forecast_brier": null,
+   "forecast_brier_const": null,
+   "forecast_offset": null,
+   "forecast_logloss": null,
+   "forecast_ece": null,
+   "forecast_auc_within": null,
+   "forecast_auc_t_only": null,
+   "forecast_auc_t_plus": null,
+   "forecast_auc_step_gain": null,
+   "forecast_saturation": null,
+   "conf_brier": 0.201251505065789,
+   "conf_brier_sampled": 0.24193974630021142,
+   "conf_brier_const": 0.24874597168896298,
+   "mean_conf_hat": 0.631891757677622,
+   "mean_conf": 0.6401162790697674,
+   "conf_auc": 0.8212498048689,
+   "conf_auc_t0": 0.5657894736842105,
+   "conf_entropy": 1.4978746381226284,
+   "conf_saturation_sampled": 0.07293868921775898,
+   "conf_offset": 0.09647949552117374,
+   "conf_logloss": 0.5906484207565211,
+   "conf_ece": 0.16715211512014116,
+   "conf_auc_within": 0.5030248975474507,
+   "conf_auc_t_only": 0.7206845704364311,
+   "conf_auc_t_plus": 0.8340043597060736,
+   "conf_auc_step_gain": 0.11331978926964248,
+   "conf_saturation": 0.0
+  },
+  "s29": {
+   "episodes": 120,
+   "wins": 78,
+   "wilson95": [
+    0.561213245977243,
+    0.729481004097146
+   ],
+   "seeds": [
+    101,
+    102,
+    103
+   ],
+   "win_rate": 0.65,
+   "mean_length": 16.291666666666668,
+   "forecast_auc": null,
+   "forecast_auc_t0": null,
+   "forecast_brier": null,
+   "forecast_brier_const": null,
+   "forecast_offset": null,
+   "forecast_logloss": null,
+   "forecast_ece": null,
+   "forecast_auc_within": null,
+   "forecast_auc_t_only": null,
+   "forecast_auc_t_plus": null,
+   "forecast_auc_step_gain": null,
+   "forecast_saturation": null,
+   "conf_brier": 0.24506554761218566,
+   "conf_brier_sampled": 0.283462915601023,
+   "conf_brier_const": 0.24996539792387543,
+   "mean_conf_hat": 0.6752440606380887,
+   "mean_conf": 0.6870076726342711,
+   "conf_auc": 0.7811731321974431,
+   "conf_auc_t0": 0.5753968253968254,
+   "conf_entropy": 1.479126412677361,
+   "conf_saturation_sampled": 0.08439897698209718,
+   "conf_offset": 0.16936170769691228,
+   "conf_logloss": 0.6824062376893604,
+   "conf_ece": 0.19513188802254838,
+   "conf_auc_within": 0.5337625265514641,
+   "conf_auc_t_only": 0.7087559426988802,
+   "conf_auc_t_plus": 0.8075549470678499,
+   "conf_auc_step_gain": 0.09879900436896971,
+   "conf_saturation": 0.0
+  }
+ },
+ "stats": {
+  "win_rate": {
+   "mean": 0.6749999999999999,
+   "std": 0.022047927592204905,
+   "n": 3
+  },
+  "mean_length": {
+   "mean": 15.847222222222223,
+   "std": 0.41014338053002064,
+   "n": 3
+  },
+  "forecast_auc": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_auc_t0": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_brier": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_brier_const": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_offset": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_logloss": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_ece": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_auc_within": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_auc_t_only": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_auc_t_plus": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_auc_step_gain": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_saturation": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "conf_brier": {
+   "mean": 0.22385114936064623,
+   "std": 0.02193984414290037,
+   "n": 3
+  },
+  "conf_brier_sampled": {
+   "mean": 0.2623839515271786,
+   "std": 0.020768860977223372,
+   "n": 3
+  },
+  "conf_brier_const": {
+   "mean": 0.24793862985344214,
+   "std": 0.0025290085616440114,
+   "n": 3
+  },
+  "mean_conf_hat": {
+   "mean": 0.6698434581680862,
+   "std": 0.03556031537750055,
+   "n": 3
+  },
+  "mean_conf": {
+   "mean": 0.6808568895346436,
+   "std": 0.038040015976252915,
+   "n": 3
+  },
+  "conf_auc": {
+   "mean": 0.7938035726875515,
+   "std": 0.023794236396288016,
+   "n": 3
+  },
+  "conf_auc_t0": {
+   "mean": 0.5901533837488181,
+   "std": 0.03421817628955609,
+   "n": 3
+  },
+  "conf_entropy": {
+   "mean": 1.479617654148497,
+   "std": 0.018016386828348406,
+   "n": 3
+  },
+  "conf_saturation_sampled": {
+   "mean": 0.08491808105477804,
+   "std": 0.012247197594304947,
+   "n": 3
+  },
+  "conf_offset": {
+   "mean": 0.13275601739819262,
+   "std": 0.03644222107384135,
+   "n": 3
+  },
+  "conf_logloss": {
+   "mean": 0.6377912403604027,
+   "std": 0.045931107717540526,
+   "n": 3
+  },
+  "conf_ece": {
+   "mean": 0.16501113810818197,
+   "std": 0.031246298838729265,
+   "n": 3
+  },
+  "conf_auc_within": {
+   "mean": 0.5360436369899929,
+   "std": 0.03421637050326495,
+   "n": 3
+  },
+  "conf_auc_t_only": {
+   "mean": 0.70608000527289,
+   "std": 0.016110085885412354,
+   "n": 3
+  },
+  "conf_auc_t_plus": {
+   "mean": 0.8111643068917176,
+   "std": 0.021266347168650522,
+   "n": 3
+  },
+  "conf_auc_step_gain": {
+   "mean": 0.1050843016188275,
+   "std": 0.00745424244862553,
+   "n": 3
+  },
+  "conf_saturation": {
+   "mean": 0.0,
+   "std": 0.0,
+   "n": 3
+  }
+ },
+ "pooled": {
+  "wins": 243,
+  "episodes": 360,
+  "win_rate": 0.675,
+  "wilson95": [
+   0.6249902431500496,
+   0.7213144369389077
+  ]
+ },
+ "action_types": {
+  "go": 3120,
+  "take": 626,
+  "cook": 350,
+  "examine": 309,
+  "prepare": 306,
+  "eat": 250,
+  "drop": 247,
+  "open": 188,
+  "slice": 100,
+  "dice": 86,
+  "chop": 81,
+  "put": 28,
+  "close": 14
+ }
+}

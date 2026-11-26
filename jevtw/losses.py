@@ -126,3 +126,22 @@ def decision_loss(logps: torch.Tensor, old_logps: torch.Tensor, advantage: float
         if cal_loss == "brier":
             stats["brier"] = stats["cal"]
     return loss, stats
+
+
+def conf_term_loss(logp: torch.Tensor, old_logp: float, advantage: float, weight: float, eps: float, coef: float,
+                   *, ref_logp: float | None = None, beta: float = 0.0) -> tuple[torch.Tensor, dict]:
+    """The verbal confidence term of one decision (T0008): weight * [coef * psi(rho^c, A^c) + beta * k3 KL], with
+    rho^c = pi^c_theta(m_t) / pi^c_old(m_t). `weight` is the decision's action weight (N counts only the action
+    terms, E0012 eq. 2.5a); coef = kappa scales only the surrogate, the KL covers the term with weight beta."""
+    old = torch.as_tensor(old_logp, dtype=logp.dtype, device=logp.device)
+    loss = weight * coef * clipped_surrogate(logp, old, advantage, eps)
+    with torch.no_grad():
+        ratio = float(torch.exp(logp - old))
+        stats = {"clipped": int(ratio < 1 - eps or ratio > 1 + eps)}
+    if beta > 0:
+        if ref_logp is None:
+            raise ValueError("beta > 0 needs the reference log-probability of the confidence")
+        kl = kl_k3(logp, torch.as_tensor(ref_logp, dtype=logp.dtype, device=logp.device))
+        loss = loss + beta * weight * kl
+        stats["kl"] = float(kl.detach())
+    return loss, stats

@@ -1,0 +1,314 @@
+{
+ "runs": {
+  "s17": {
+   "episodes": 80,
+   "wins": 0,
+   "wilson95": [
+    0.0,
+    0.0458181295355271
+   ],
+   "seeds": [
+    17,
+    23
+   ],
+   "win_rate": 0.0,
+   "mean_length": 7.9625,
+   "forecast_auc": null,
+   "forecast_auc_t0": null,
+   "forecast_brier": null,
+   "forecast_brier_const": null,
+   "forecast_offset": null,
+   "forecast_logloss": null,
+   "forecast_ece": null,
+   "forecast_auc_within": null,
+   "forecast_auc_t_only": null,
+   "forecast_auc_t_plus": null,
+   "forecast_auc_step_gain": null,
+   "forecast_saturation": null,
+   "conf_brier": 0.5943485395050943,
+   "conf_brier_sampled": 0.6200078492935636,
+   "conf_brier_const": 0.0,
+   "mean_conf_hat": 0.7696712232354656,
+   "mean_conf": 0.7789638932496075,
+   "conf_auc": null,
+   "conf_auc_t0": null,
+   "conf_entropy": 1.4224400757294147,
+   "conf_saturation_sampled": 0.12087912087912088,
+   "conf_offset": 0.7696712232354656,
+   "conf_logloss": 1.489255004326281,
+   "conf_ece": 0.7696712232354654,
+   "conf_auc_within": null,
+   "conf_auc_t_only": null,
+   "conf_auc_t_plus": null,
+   "conf_auc_step_gain": null,
+   "conf_saturation": 0.0
+  },
+  "s23": {
+   "episodes": 80,
+   "wins": 0,
+   "wilson95": [
+    0.0,
+    0.0458181295355271
+   ],
+   "seeds": [
+    17,
+    23
+   ],
+   "win_rate": 0.0,
+   "mean_length": 8.225,
+   "forecast_auc": null,
+   "forecast_auc_t0": null,
+   "forecast_brier": null,
+   "forecast_brier_const": null,
+   "forecast_offset": null,
+   "forecast_logloss": null,
+   "forecast_ece": null,
+   "forecast_auc_within": null,
+   "forecast_auc_t_only": null,
+   "forecast_auc_t_plus": null,
+   "forecast_auc_step_gain": null,
+   "forecast_saturation": null,
+   "conf_brier": 0.5676049830392784,
+   "conf_brier_sampled": 0.5824126139817629,
+   "conf_brier_const": 0.0,
+   "mean_conf_hat": 0.7519352966977626,
+   "mean_conf": 0.755243161094225,
+   "conf_auc": null,
+   "conf_auc_t0": null,
+   "conf_entropy": 1.3327793953546712,
+   "conf_saturation_sampled": 0.06231003039513678,
+   "conf_offset": 0.7519352966977626,
+   "conf_logloss": 1.4138536495633258,
+   "conf_ece": 0.7519352966977627,
+   "conf_auc_within": null,
+   "conf_auc_t_only": null,
+   "conf_auc_t_plus": null,
+   "conf_auc_step_gain": null,
+   "conf_saturation": 0.0
+  },
+  "s29": {
+   "episodes": 80,
+   "wins": 1,
+   "wilson95": [
+    0.0022099755204522745,
+    0.06746270077668665
+   ],
+   "seeds": [
+    17,
+    23
+   ],
+   "win_rate": 0.0125,
+   "mean_length": 8.0875,
+   "forecast_auc": null,
+   "forecast_auc_t0": null,
+   "forecast_brier": null,
+   "forecast_brier_const": null,
+   "forecast_offset": null,
+   "forecast_logloss": null,
+   "forecast_ece": null,
+   "forecast_auc_within": null,
+   "forecast_auc_t_only": null,
+   "forecast_auc_t_plus": null,
+   "forecast_auc_step_gain": null,
+   "forecast_saturation": null,
+   "conf_brier": 0.5568360512674686,
+   "conf_brier_sampled": 0.566758114374034,
+   "conf_brier_const": 0.02850392609810109,
+   "mean_conf_hat": 0.7542871316281408,
+   "mean_conf": 0.7560278207109737,
+   "conf_auc": 0.4052547770700637,
+   "conf_auc_t0": 0.7911392405063291,
+   "conf_entropy": 1.3255234441735215,
+   "conf_saturation_sampled": 0.07264296754250386,
+   "conf_offset": 0.72492082560032,
+   "conf_logloss": 1.392108979197352,
+   "conf_ece": 0.7249208256003201,
+   "conf_auc_within": 0.5155502392344498,
+   "conf_auc_t_only": 0.7394820650351994,
+   "conf_auc_t_plus": 0.737303050620181,
+   "conf_auc_step_gain": -0.002179014415018443,
+   "conf_saturation": 0.0
+  }
+ },
+ "stats": {
+  "win_rate": {
+   "mean": 0.004166666666666667,
+   "std": 0.007216878364870323,
+   "n": 3
+  },
+  "mean_length": {
+   "mean": 8.091666666666667,
+   "std": 0.13129959380490572,
+   "n": 3
+  },
+  "forecast_auc": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_auc_t0": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_brier": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_brier_const": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_offset": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_logloss": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_ece": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_auc_within": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_auc_t_only": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_auc_t_plus": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_auc_step_gain": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "forecast_saturation": {
+   "mean": null,
+   "std": null,
+   "n": 0
+  },
+  "conf_brier": {
+   "mean": 0.5729298579372805,
+   "std": 0.01931482365837259,
+   "n": 3
+  },
+  "conf_brier_sampled": {
+   "mean": 0.5897261925497869,
+   "std": 0.0273678623727363,
+   "n": 3
+  },
+  "conf_brier_const": {
+   "mean": 0.00950130869936703,
+   "std": 0.016456749405699862,
+   "n": 3
+  },
+  "mean_conf_hat": {
+   "mean": 0.7586312171871231,
+   "std": 0.009632968496030559,
+   "n": 3
+  },
+  "mean_conf": {
+   "mean": 0.7634116250182688,
+   "std": 0.013474372268613123,
+   "n": 3
+  },
+  "conf_auc": {
+   "mean": 0.4052547770700637,
+   "std": null,
+   "n": 1
+  },
+  "conf_auc_t0": {
+   "mean": 0.7911392405063291,
+   "std": null,
+   "n": 1
+  },
+  "conf_entropy": {
+   "mean": 1.3602476384192024,
+   "std": 0.05398228089683053,
+   "n": 3
+  },
+  "conf_saturation_sampled": {
+   "mean": 0.08527737293892051,
+   "std": 0.03126188957534446,
+   "n": 3
+  },
+  "conf_offset": {
+   "mean": 0.7488424485111828,
+   "std": 0.022534946295805384,
+   "n": 3
+  },
+  "conf_logloss": {
+   "mean": 1.4317392110289864,
+   "std": 0.05098291411143611,
+   "n": 3
+  },
+  "conf_ece": {
+   "mean": 0.7488424485111828,
+   "std": 0.022534946295805283,
+   "n": 3
+  },
+  "conf_auc_within": {
+   "mean": 0.5155502392344498,
+   "std": null,
+   "n": 1
+  },
+  "conf_auc_t_only": {
+   "mean": 0.7394820650351994,
+   "std": null,
+   "n": 1
+  },
+  "conf_auc_t_plus": {
+   "mean": 0.737303050620181,
+   "std": null,
+   "n": 1
+  },
+  "conf_auc_step_gain": {
+   "mean": -0.002179014415018443,
+   "std": null,
+   "n": 1
+  },
+  "conf_saturation": {
+   "mean": 0.0,
+   "std": 0.0,
+   "n": 3
+  }
+ },
+ "pooled": {
+  "wins": 1,
+  "episodes": 240,
+  "win_rate": 0.004166666666666667,
+  "wilson95": [
+   0.0007358980250827037,
+   0.02322007258362979
+  ]
+ },
+ "action_types": {
+  "take": 606,
+  "cook": 386,
+  "examine": 243,
+  "drop": 173,
+  "prepare": 167,
+  "open": 138,
+  "chop": 104,
+  "dice": 54,
+  "slice": 42,
+  "put": 15,
+  "close": 12,
+  "insert": 1,
+  "eat": 1
+ }
+}
