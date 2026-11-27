@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Callable, Sequence, TypeVar
 
 import torch
@@ -120,6 +121,12 @@ def balance(costs: Sequence[float], world: int) -> list[int]:
 
 _CURRENT = Dist()
 
+# Collective timeout. NCCL's default (10 min) is shorter than the gap between processes in one rollout: with verbal
+# confidence on C4 (M = 101, H = 102) a batch's rollout takes 6-9 min, and when one process slows down (allocator
+# retries near the memory limit) the others wait more than 10 min in `gather` and the watchdog aborts the job
+# (E0015 g5/g6-C2toC4, batch 19). Two hours still stops a job that is truly stuck.
+TIMEOUT = timedelta(hours=2)
+
 
 def current() -> Dist:
     return _CURRENT
@@ -136,9 +143,9 @@ def setup() -> Dist:
     rank, local = int(os.environ["RANK"]), int(os.environ.get("LOCAL_RANK", "0"))
     if torch.cuda.is_available():
         torch.cuda.set_device(local)
-        torch_dist.init_process_group("nccl", device_id=torch.device("cuda", local))
+        torch_dist.init_process_group("nccl", device_id=torch.device("cuda", local), timeout=TIMEOUT)
     else:
-        torch_dist.init_process_group("gloo")
+        torch_dist.init_process_group("gloo", timeout=TIMEOUT)
     _CURRENT = Dist(rank=rank, world=world, local_rank=local)
     return _CURRENT
 
