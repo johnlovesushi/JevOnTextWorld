@@ -34,7 +34,8 @@ jevtw/
   testing.py     字节分词器 + 随机小模型（测试用，不需要下载）
 configs/         grpo.json（λ=α=0）、grpo_calibrated.json（λ=0.3, α=0.1）、grpo_feedback.json（grpo.json + history_mode=feedback）
   experiments/   每个实验一份配置：<ID>.json
-scripts/         make_games.py：用 tw-make 生成 cooking 游戏
+scripts/         make_games.py：用 tw-make 生成 cooking 游戏；make_levels.sh：按 docs/data.md 重新生成 C0–C4 / L0 / L1 并核对
+                 data_fingerprint.py：写出 / 核对游戏目录的逐局指纹（docs/fingerprints/）
                  summarize_run.py：把一次运行整理成固定格式的报告
                  build_sft_data.py：沿通关路线生成 SFT 数据（CPU）
                  final_eval.py：在测试集上用固定种子 101/102/103 做最终评测；aggregate_final.py：合并多个训练种子的结果
@@ -44,6 +45,11 @@ reports/         实验报告 <ID>.md / <ID>.json
 tests/           CPU 单元测试
 CLAUDE.md        给服务器端 agent 的工作说明
 ```
+
+## 数据
+
+难度 C0–C4（以及早期的 L0 / L1）的定义、生成命令、train / valid / test 的用法、训练和评测种子、每个实验用了哪份数据：
+见 [`docs/data.md`](docs/data.md)。
 
 ## 协作方式
 
