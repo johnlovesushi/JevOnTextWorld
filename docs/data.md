@@ -3,7 +3,24 @@
 这份文档说明本仓库实验用到的全部数据：每个难度的游戏怎么生成、train / valid / test 怎么划分、每个实验用了哪一份、
 训练和评测各用什么种子。照着做就能拿到和我们相同的游戏，并按相同方式使用。
 
-`data/` 不进 git（约 140–180 MB / 难度）。仓库里有的是：
+`data/` 不进 git（约 140–180 MB / 难度）。**我们用的原始游戏文件（逐字节相同）和 SFT 数据在 GitHub release
+[`data-v1`](https://github.com/johnlovesushi/JevOnTextWorld/releases/tag/data-v1)**，推荐直接下载，不要重新生成：
+
+```bash
+mkdir -p data && cd data
+gh release download data-v1 -R johnlovesushi/JevOnTextWorld     # 或在网页上下载附件
+sha256sum -c SHA256SUMS
+for f in *.tar.gz; do tar -xzf "$f"; done                        # → data/games_C0 … games_L1、data/sft/T0010/after
+cd .. && python scripts/data_fingerprint.py verify data/games_C3 docs/fingerprints/games_C3.jsonl
+```
+
+| release 附件 | 内容 |
+|---|---|
+| `games_<难度>.tar.gz`（C0–C4、L0、L1，各约 45 MB） | `games_<难度>/{train,valid,test}`（`.z8` / `.json` / `.ni`）和 `manifest.json` |
+| `sft_T0010_after.tar.gz` | `sft/T0010/after/C{1,2,3,4}_train.jsonl` 和统计文件（`sft/C1_train.jsonl` 和其中的 C1 逐字节相同） |
+| `SHA256SUMS` | 各压缩包的 sha256 |
+
+仓库里有的是：
 
 | 文件 | 内容 |
 |---|---|
@@ -79,7 +96,7 @@ python scripts/make_games.py --out data/games_L1 --train 200 --valid 40 --test 4
   里一些集合的顺序不同（Python 的 hash 随机化），所以 sha256 不同。我们核对过一局（C3 valid 0000）。
 - 因此 `scripts/data_fingerprint.py verify` 只要求 `uuid` 和通关路线一致；字节完全一致的局数只报告，不要求。
   拿到我们原始文件的拷贝时，sha256 会全部一致（280 / 280）。
-- 想要逐字节相同的游戏，就直接拷贝我们的 `data/games_<难度>`，不要重新生成。
+- 想要逐字节相同的游戏，就从 release `data-v1` 下载，不要重新生成。
 
 ## 3. 每个划分怎么用
 
