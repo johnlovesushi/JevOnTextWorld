@@ -100,6 +100,15 @@ def evaluate(policy: LMPolicy, games, seeds, max_actions: int, parallel: int = 1
             **forecast_metrics(episodes), **verbal_metrics(episodes), **sampling}
 
 
+def draw_jobs(rng: random.Random, train_games, g) -> list:
+    """The games of one batch: one list of G (name, make_env, env_seed, episode seed) jobs per game. The games are
+    split over the processes."""
+    jobs = []
+    for name, make_env, env_seed in (rng.choice(train_games) for _ in range(g.games_per_batch)):
+        jobs.append([(name, make_env, env_seed, rng.randrange(2 ** 31)) for _ in range(g.group_size)])
+    return jobs
+
+
 def save_checkpoint(directory: Path, model, tokenizer, policy: LMPolicy) -> None:
     """Model weights, the tokenizer (so that the directory can be given to --model on its own) and platt.json."""
     model.save_pretrained(directory)
@@ -174,6 +183,12 @@ def main(argv=None):
     ap.add_argument("--eval-every", type=int, default=50)
     ap.add_argument("--eval-seeds", type=int, nargs="+", default=[17, 23, 29])
     ap.add_argument("--seed", type=int, default=17)
+    ap.add_argument("--ref-model", help="model of the KL term (default: a copy of --model); a resumed run gives "
+                                        "the model the interrupted run started from")
+    ap.add_argument("--start-batch", type=int, default=1,
+                    help="resume: --model is the checkpoint after batch N-1 of an interrupted run with the same "
+                         "--seed; the game draws of batches 1..N-1 are replayed, the warmup counts them, and the "
+                         "evaluation of batch 0 is skipped. The optimizer state is not restored")
     ap.add_argument("--no-save", action="store_true", help="do not write checkpoints")
     ap.add_argument("--smoke", action="store_true", help="tiny random model on KeyChest, CPU")
     ap.add_argument("--save-forecasts", action="store_true",
@@ -186,6 +201,8 @@ def main(argv=None):
     ap.add_argument("--wandb-mode", choices=("online", "offline"), default="online",
                     help="online falls back to offline when wandb.init fails")
     args = ap.parse_args(argv)
+    if not 1 <= args.start_batch <= max(args.batches, 1):   # --batches 0 (evaluation only) keeps the default
+        ap.error("need 1 <= --start-batch <= --batches")
     dist = dist_mod.setup()
     try:
         _run(args, dist)
@@ -242,12 +259,19 @@ def _run(args, dist: dist_mod.Dist):
     rng = random.Random(args.seed)
     reference = None
     if cfg.grpo.beta > 0:
-        reference = copy.deepcopy(model).requires_grad_(False)
+        if args.ref_model:
+            reference = load(argparse.Namespace(**{**vars(args), "model": args.ref_model, "revision": None}),
+                             cfg)[0].requires_grad_(False)
+        else:
+            reference = copy.deepcopy(model).requires_grad_(False)
     policy = LMPolicy(model, tokenizer, cfg.policy)
     if policy.load_platt(args.model):
         print(f"loaded Platt parameters a = {float(policy.platt_a):.6g}, b = {float(policy.platt_b):.6g}", flush=True)
     trainer = Trainer(policy, cfg.grpo, reference_model=reference, dist=dist)
     g = cfg.grpo
+    for _ in range(1, args.start_batch):  # resume: the same games and env seeds as the uninterrupted run
+        draw_jobs(rng, train_games, g)
+    trainer.batches_done = args.start_batch - 1
 
     def run_eval(batch):
         if val_games:
@@ -259,14 +283,13 @@ def _run(args, dist: dist_mod.Dist):
             log({"batch": batch, "split": "val", "eval_s": round(time.time() - start, 2), **result})
 
     try:
-        run_eval(0)
-        for batch in range(1, args.batches + 1):
+        if args.start_batch == 1:
+            run_eval(0)
+        for batch in range(args.start_batch, args.batches + 1):
             if torch.cuda.is_available():
                 torch.cuda.reset_peak_memory_stats()
             start = time.time()
-            game_jobs = []                # one list of G jobs per game; the games are split over the processes
-            for name, make_env, env_seed in (rng.choice(train_games) for _ in range(g.games_per_batch)):
-                game_jobs.append([(name, make_env, env_seed, rng.randrange(2 ** 31)) for _ in range(g.group_size)])
+            game_jobs = draw_jobs(rng, train_games, g)
             stats = {}
 
             def play(parts):
